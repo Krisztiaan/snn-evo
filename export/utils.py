@@ -48,11 +48,12 @@ class NumpyEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, np.ndarray):
             return obj.tolist()
-        elif isinstance(obj, (np.integer, np.int_)):
+        # Use abstract base classes for NumPy 2.0 compatibility
+        elif isinstance(obj, np.integer):
             return int(obj)
-        elif isinstance(obj, (np.floating, np.float_)):
+        elif isinstance(obj, np.floating):
             return float(obj)
-        elif isinstance(obj, (np.bool_, bool)):
+        elif isinstance(obj, np.bool_):
             return bool(obj)
         elif isinstance(obj, np.void):
             return None

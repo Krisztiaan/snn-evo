@@ -40,7 +40,9 @@
             padding: 15px;
             border-radius: 5px;
             font-size: 14px;
-            width: 250px;
+            width: 300px;
+            max-height: 90vh;
+            overflow-y: auto;
         }
         
         #controls button {
@@ -132,16 +134,67 @@
             background: white;
             transition: left 0.3s ease;
         }
+        
+        .experiment-item {
+            background: #333;
+            border: 1px solid #555;
+            border-radius: 3px;
+            padding: 10px;
+            margin: 5px 0;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        .experiment-item:hover {
+            background: #444;
+        }
+        
+        .experiment-item.selected {
+            background: #1976D2;
+            border-color: #2196F3;
+        }
+        
+        .experiment-label {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .experiment-details {
+            font-size: 11px;
+            color: #ccc;
+        }
+        
+        #experimentList {
+            max-height: 300px;
+            overflow-y: auto;
+            margin: 10px 0;
+        }
+        
+        .episode-selector {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 10px 0;
+        }
+        
+        .episode-selector select {
+            flex: 1;
+            padding: 5px;
+            background: #333;
+            color: white;
+            border: 1px solid #555;
+        }
     </style>
 </head>
 <body>
     <div id="container"></div>
     
-    <div id="loadingOverlay">Loading trajectory data...</div>
+    <div id="loadingOverlay">Loading experiments...</div>
     
     <div id="info">
         <h3>Grid World Trajectory</h3>
         <div><span class="label">Grid Size:</span> <span id="gridSize">-</span></div>
+        <div><span class="label">Episode:</span> <span id="episodeId">-</span></div>
         <div><span class="label">Total Steps:</span> <span id="totalSteps">-</span></div>
         <div><span class="label">Agent Position:</span> <span id="agentPos">-</span></div>
         <div><span class="label">Rewards Collected:</span> <span id="rewardsCollected">0</span></div>
@@ -159,6 +212,31 @@
     </div>
     
     <div id="controls">
+        <h3>Experiment Selection</h3>
+        <button onclick="refreshExperiments()">🔄 Refresh Experiments</button>
+        
+        <div style="margin: 10px 0;">
+            <label class="label">Model Type:</label>
+            <select id="modelSelect" onchange="selectModel()" style="width: 100%; padding: 5px; background: #333; color: white; border: 1px solid #555;">
+                <option value="">Select a model...</option>
+            </select>
+        </div>
+        
+        <div id="runSelection" style="display: none;">
+            <label class="label">Run:</label>
+            <div id="experimentList">
+                <div style="text-align: center; color: #666;">Select a model first</div>
+            </div>
+            
+            <div class="episode-selector" id="episodeSelector" style="display: none;">
+                <label class="label">Episode:</label>
+                <select id="episodeSelect"></select>
+                <button onclick="loadSelectedEpisode()">Load</button>
+            </div>
+        </div>
+        
+        <hr style="border-color: #444; margin: 15px 0;">
+        
         <h3>Playback Controls</h3>
         <div id="stepDisplay">Step: 0 / 0</div>
         <input type="range" id="timeline" min="0" max="0" value="0" step="1">
@@ -172,7 +250,9 @@
         <input type="range" id="playSpeed" min="0.1" max="5" step="0.1" value="1">
         <div id="speedDisplay" style="text-align: center;">1.0x</div>
         
-        <br>
+        <hr style="border-color: #444; margin: 15px 0;">
+        
+        <h3>Visual Options</h3>
         <button onclick="toggleTrail()">Toggle Trail</button>
         <button onclick="toggleGridLines()">Toggle Grid Lines</button>
         <button onclick="toggleRewardGlow()">Toggle Reward Glow</button>
@@ -182,19 +262,6 @@
         <label class="label">
             <input type="checkbox" id="autoRotate" onchange="toggleAutoRotate()"> Auto Rotate
         </label>
-        
-        <br>
-        <h3 style="margin-top: 15px;">Load Run Data</h3>
-        <label class="label">Select Run:</label>
-        <select id="runSelector" style="width: 100%; margin: 5px 0; padding: 5px; background: #333; color: white; border: 1px solid #555;">
-            <option value="">Loading runs...</option>
-        </select>
-        <button onclick="loadSelectedRun()" style="margin-top: 5px;">Load Selected Run</button>
-        
-        <div style="margin: 10px 0; text-align: center; color: #666;">— OR —</div>
-        
-        <label class="label">Load Custom File:</label>
-        <input type="file" id="fileInput" accept=".json" style="width: 100%; margin: 5px 0;">
     </div>
 
     <script type="importmap">
@@ -221,7 +288,8 @@
         let playInterval = null;
         let showTrail = true;
         let rewardGlows = [];
-        let runsIndex = null;
+        let experimentsByModel = {};
+        let selectedExperiment = null;
         
         // Configuration
         let CONFIG = {
@@ -274,9 +342,6 @@
             // Window resize handler
             window.addEventListener('resize', onWindowResize);
             
-            // File input handler
-            document.getElementById('fileInput').addEventListener('change', handleFileSelect);
-            
             // Timeline handler
             const timeline = document.getElementById('timeline');
             timeline.addEventListener('input', (e) => {
@@ -293,64 +358,138 @@
             // Start animation loop
             animate();
             
-            // Load runs index
-            loadRunsIndex();
-            
-            // Load default trajectory data
-            loadTrajectoryData('trajectory_data.json');
+            // Load experiments
+            refreshExperiments();
         }
         
-        function loadRunsIndex() {
-            fetch('runs_index.json')
-                .then(response => response.json())
-                .then(data => {
-                    runsIndex = data;
-                    populateRunSelector();
-                })
-                .catch(error => {
-                    console.error('Error loading runs index:', error);
-                    // Try to scan for runs
-                    document.getElementById('runSelector').innerHTML = 
-                        '<option value="">No runs index found</option>';
-                });
-        }
-        
-        function populateRunSelector() {
-            const selector = document.getElementById('runSelector');
-            selector.innerHTML = '<option value="">Select a run...</option>';
+        async function refreshExperiments() {
+            const modelSelect = document.getElementById('modelSelect');
+            modelSelect.innerHTML = '<option value="">Loading models...</option>';
+            document.getElementById('runSelection').style.display = 'none';
+            document.getElementById('loadingOverlay').style.display = 'flex';
+            document.getElementById('loadingOverlay').textContent = 'Loading experiments...';
             
-            if (runsIndex && runsIndex.runs) {
-                runsIndex.runs.forEach((run, index) => {
+            try {
+                const response = await fetch('/api/experiments');
+                const data = await response.json();
+                experimentsByModel = data.models;
+                
+                document.getElementById('loadingOverlay').style.display = 'none';
+                
+                modelSelect.innerHTML = '<option value="">Select a model...</option>';
+                Object.keys(experimentsByModel).sort().forEach(modelName => {
                     const option = document.createElement('option');
-                    option.value = run.path;
-                    option.textContent = run.label;
-                    option.dataset.index = index;
-                    selector.appendChild(option);
+                    option.value = modelName;
+                    option.textContent = `${modelName} (${experimentsByModel[modelName].length} runs)`;
+                    modelSelect.appendChild(option);
                 });
+                
+                if (data.model_count === 0) {
+                    modelSelect.innerHTML = '<option value="">No models found</option>';
+                }
+            } catch (error) {
+                console.error('Error loading experiments:', error);
+                modelSelect.innerHTML = '<option value="">Error loading models</option>';
+                document.getElementById('loadingOverlay').style.display = 'none';
             }
         }
         
-        window.loadSelectedRun = function() {
-            const selector = document.getElementById('runSelector');
-            const selectedPath = selector.value;
+        window.selectModel = function() {
+            const modelName = document.getElementById('modelSelect').value;
             
-            if (!selectedPath) {
-                alert('Please select a run to load');
+            if (!modelName) {
+                document.getElementById('runSelection').style.display = 'none';
                 return;
             }
             
-            // Extract the run data
-            document.getElementById('loadingOverlay').style.display = 'flex';
-            document.getElementById('loadingOverlay').textContent = 'Extracting run data...';
+            document.getElementById('runSelection').style.display = 'block';
+            displayExperiments(modelName);
+        };
+        
+        function displayExperiments(modelName) {
+            const listDiv = document.getElementById('experimentList');
+            listDiv.innerHTML = '';
             
-            // Call Python script to extract data
-            // For now, we'll assume the data has been pre-extracted
-            const runDir = selectedPath.split('/').slice(-2, -1)[0];
-            const trajectoryFile = `trajectory_${runDir}.json`;
+            const modelExperiments = experimentsByModel[modelName] || [];
             
-            // Try to load the pre-extracted file
-            loadTrajectoryData(trajectoryFile);
+            if (modelExperiments.length === 0) {
+                listDiv.innerHTML = '<div style="text-align: center; color: #666;">No runs found</div>';
+                return;
+            }
+            
+            modelExperiments.forEach((exp, index) => {
+                const item = document.createElement('div');
+                item.className = 'experiment-item';
+                item.dataset.model = modelName;
+                item.dataset.index = index;
+                
+                const label = document.createElement('div');
+                label.className = 'experiment-label';
+                label.textContent = exp.label;
+                
+                const details = document.createElement('div');
+                details.className = 'experiment-details';
+                
+                const episodes = exp.episodes.length;
+                const timestamp = new Date(exp.timestamp * 1000).toLocaleString();
+                details.innerHTML = `
+                    Episodes: ${episodes}<br>
+                    Path: ${exp.directory}<br>
+                    Time: ${timestamp}
+                `;
+                
+                item.appendChild(label);
+                item.appendChild(details);
+                
+                item.onclick = () => selectExperiment(modelName, index);
+                
+                listDiv.appendChild(item);
+            });
         }
+        
+        function selectExperiment(modelName, index) {
+            selectedExperiment = experimentsByModel[modelName][index];
+            
+            document.querySelectorAll('.experiment-item').forEach(item => item.classList.remove('selected'));
+            document.querySelector(`[data-model="${modelName}"][data-index="${index}"]`).classList.add('selected');
+            
+            const episodeSelector = document.getElementById('episodeSelector');
+            const episodeSelect = document.getElementById('episodeSelect');
+            
+            episodeSelector.style.display = 'flex';
+            episodeSelect.innerHTML = '';
+            
+            selectedExperiment.episodes.forEach(ep => {
+                const option = document.createElement('option');
+                option.value = ep;
+                option.textContent = `Episode ${ep}`;
+                episodeSelect.appendChild(option);
+            });
+        }
+        
+        window.loadSelectedEpisode = async function() {
+            if (!selectedExperiment) return;
+            
+            const episodeId = parseInt(document.getElementById('episodeSelect').value);
+            
+            document.getElementById('loadingOverlay').style.display = 'flex';
+            document.getElementById('loadingOverlay').textContent = 'Loading episode data...';
+            
+            try {
+                const response = await fetch(`/api/trajectory?path=${encodeURIComponent(selectedExperiment.path)}&episode=${episodeId}`);
+                trajectoryData = await response.json();
+                
+                if (trajectoryData.error) {
+                    throw new Error(trajectoryData.message);
+                }
+
+                setupVisualization();
+                document.getElementById('loadingOverlay').style.display = 'none';
+            } catch (error) {
+                console.error('Error loading episode:', error);
+                document.getElementById('loadingOverlay').textContent = `Error: ${error.message}`;
+            }
+        };
         
         function setupLights() {
             // Ambient light
@@ -606,29 +745,13 @@
             );
         }
         
-        function loadTrajectoryData(filename) {
-            document.getElementById('loadingOverlay').style.display = 'flex';
-            
-            fetch(filename)
-                .then(response => response.json())
-                .then(data => {
-                    trajectoryData = data;
-                    setupVisualization();
-                    document.getElementById('loadingOverlay').style.display = 'none';
-                })
-                .catch(error => {
-                    console.error('Error loading trajectory data:', error);
-                    document.getElementById('loadingOverlay').textContent = 
-                        'Error loading data. Please select a trajectory file.';
-                });
-        }
-        
         function setupVisualization() {
             if (!trajectoryData) return;
             
             // Update metadata display
             const meta = trajectoryData.metadata;
             document.getElementById('gridSize').textContent = `${meta.gridSize}x${meta.gridSize}`;
+            document.getElementById('episodeId').textContent = meta.episodeId || '0';
             document.getElementById('totalSteps').textContent = meta.totalSteps;
             document.getElementById('coverage').textContent = meta.coverage ? `${(meta.coverage * 100).toFixed(1)}%` : 'N/A';
             document.getElementById('seed').textContent = meta.seed || 'N/A';
@@ -672,7 +795,9 @@
                 stepData.rewardCollected.forEach((collected, index) => {
                     if (rewards[index]) {
                         rewards[index].visible = !collected;
-                        rewardGlows[index].visible = !collected;
+                        if (rewardGlows[index]) {
+                            rewardGlows[index].visible = !collected;
+                        }
                         rewards[index].userData.collected = collected;
                     }
                 });
@@ -754,22 +879,6 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
         
-        function handleFileSelect(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-            
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                try {
-                    trajectoryData = JSON.parse(e.target.result);
-                    setupVisualization();
-                } catch (error) {
-                    alert('Error parsing JSON file: ' + error.message);
-                }
-            };
-            reader.readAsText(file);
-        }
-        
         // Control functions
         window.togglePlay = function() {
             isPlaying = !isPlaying;
@@ -834,6 +943,8 @@
                 gridWorld.rotation.y = 0;
             }
         };
+        
+        window.refreshExperiments = refreshExperiments;
         
         // Initialize on load
         init();

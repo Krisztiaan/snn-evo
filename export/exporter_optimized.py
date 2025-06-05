@@ -13,7 +13,7 @@ import threading
 from queue import Queue
 import zlib
 
-from .utils import ensure_numpy
+from .utils import ensure_numpy, NumpyEncoder
 from .schema import validate_timestep_data, validate_weight_change, validate_network_structure, SCHEMA_VERSION
 
 
@@ -288,7 +288,7 @@ class OptimizedEpisode:
                 compression_opts=self.compression_opts
             )
             
-        self.datasets['timesteps'].append(timestep)
+        self.datasets['timesteps'].append(ensure_numpy(timestep))
         
         # Append each field
         for key, value in data.items():
@@ -321,7 +321,7 @@ class OptimizedEpisode:
                 compression_opts=self.compression_opts
             )
             
-        self.datasets[f'{beh_key}_timesteps'].append(timestep)
+        self.datasets[f'{beh_key}_timesteps'].append(ensure_numpy(timestep))
         
         for key, value in data.items():
             value_np = ensure_numpy(value)
@@ -374,6 +374,17 @@ class OptimizedEpisode:
         for key, value in data.items():
             self.event_buffers[event_type][key].append((timestep, value))
             
+    def log_static_data(self, name: str, data: Dict[str, Any]):
+        """Save static, one-off data for the episode."""
+        group = self.group.create_group(name)
+        for key, value in data.items():
+            group.create_dataset(
+                key, 
+                data=ensure_numpy(value),
+                compression=self.compression,
+                compression_opts=self.compression_opts
+            )
+
     def end(self, success: bool = False, final_state: Optional[Dict[str, Any]] = None):
         """End episode and flush all buffers."""
         # Flush all buffered datasets
@@ -597,35 +608,56 @@ class OptimizedDataExporter:
         
     def save_config(self, config: Dict[str, Any]):
         """Save experiment configuration."""
+        def _to_serializable(obj):
+            if hasattr(obj, '_asdict'):
+                return _to_serializable(obj._asdict())
+            if isinstance(obj, dict):
+                return {k: _to_serializable(v) for k, v in obj.items()}
+            if isinstance(obj, (list, tuple)):
+                return [_to_serializable(i) for i in obj]
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            # Use abstract base classes for NumPy 2.0 compatibility
+            if isinstance(obj, np.integer):
+                return int(obj)
+            if isinstance(obj, np.floating):
+                return float(obj)
+            return obj
+
+        serializable_config = _to_serializable(config)
+
         # Save as JSON for readability
         with open(self.output_dir / 'config.json', 'w') as f:
-            json.dump(config, f, indent=2)
+            json.dump(serializable_config, f, indent=2, cls=NumpyEncoder)
             
         # Also save in HDF5 with compression
         if 'config' in self.h5_file:
             del self.h5_file['config']
         config_group = self.h5_file.create_group('config')
         
-        for key, value in config.items():
+        for key, value in serializable_config.items():
             if isinstance(value, (dict, list)):
                 # Compress JSON strings
-                json_str = json.dumps(value)
+                json_str = json.dumps(value, cls=NumpyEncoder)
                 compressed = zlib.compress(json_str.encode('utf-8'))
-                config_group.attrs[key] = compressed
+                config_group.attrs[key] = np.void(compressed)
                 config_group.attrs[f'{key}_compressed'] = True
             else:
-                config_group.attrs[key] = value
+                try:
+                    config_group.attrs[key] = value
+                except TypeError:
+                    config_group.attrs[key] = str(value)
                 
     def save_metadata(self, metadata: Dict[str, Any]):
         """Save additional experiment metadata."""
         for key, value in metadata.items():
             if isinstance(value, (dict, list)):
-                self.h5_file.attrs[f'meta_{key}'] = json.dumps(value)
+                self.h5_file.attrs[f'meta_{key}'] = json.dumps(value, cls=NumpyEncoder)
             else:
                 self.h5_file.attrs[f'meta_{key}'] = value
                 
         with open(self.output_dir / 'metadata.json', 'w') as f:
-            json.dump(metadata, f, indent=2)
+            json.dump(metadata, f, indent=2, cls=NumpyEncoder)
             
     def save_runtime_info(self):
         """Capture runtime environment info."""
@@ -689,7 +721,7 @@ class OptimizedDataExporter:
                     
                     # Compress code
                     compressed = zlib.compress(code_content.encode('utf-8'))
-                    code_group.attrs[file_path.name] = compressed
+                    code_group.attrs[file_path.name] = np.void(compressed)
                     code_group.attrs[f'{file_path.name}_compressed'] = True
                     saved_files.append(str(file_path))
                     
@@ -891,7 +923,10 @@ class OptimizedDataExporter:
         # Add custom summary
         if summary:
             for key, value in summary.items():
-                ep_summary.attrs[key] = value
+                if isinstance(value, (dict, list)):
+                    ep_summary.attrs[key] = json.dumps(value, cls=NumpyEncoder)
+                else:
+                    ep_summary.attrs[key] = value
                 
         self.current_episode = None
         self.h5_file.flush()
@@ -921,6 +956,12 @@ class OptimizedDataExporter:
                 reward=kwargs.get('reward')
             )
             
+    def log_static_episode_data(self, name: str, data: Dict[str, Any]):
+        """Save static, one-off data for the current episode."""
+        if self.current_episode is None:
+            raise RuntimeError("No active episode. Call start_episode() first.")
+        self.current_episode.log_static_data(name, data)
+
     def save_checkpoint(self, name: str, data: Dict[str, Any]):
         """Save checkpoint with compression."""
         checkpoint = self.checkpoints_group.create_group(

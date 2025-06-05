@@ -1,4 +1,4 @@
-# models/phase_0.5/run.py
+# models/phase_0_5/run.py
 # keywords: [snn run, experiment runner, phase 0.5]
 """Main script to run Phase 0.5 SNN agent experiments."""
 
@@ -15,7 +15,7 @@ def main():
     parser.add_argument("--episodes", type=int, default=1, help="Number of episodes to run")
     parser.add_argument("--steps", type=int, default=10000, help="Max steps per episode")
     parser.add_argument("--seed", type=int, default=42, help="Master random seed")
-    parser.add_argument("--export-dir", type=str, default="experiments/phase_0.5", help="Directory for data export")
+    parser.add_argument("--export-dir", type=str, default="experiments/models/phase_0_5", help="Directory for data export")
     parser.add_argument("--no-export", action="store_true", help="Disable data exporting")
     
     args = parser.parse_args()
@@ -47,23 +47,10 @@ def main():
     print(f"Data export: {'ENABLED' if not args.no_export else 'DISABLED'}")
     print("=" * 40)
     
-    # Initialize agent
+    # Initialize agent and run the full experiment
     agent = SnnAgent(config)
-    master_key = random.PRNGKey(args.seed)
+    all_summaries = agent.run_experiment()
     
-    all_summaries = []
-    for i in range(args.episodes):
-        print(f"\n--- Episode {i+1}/{args.episodes} ---")
-        episode_key, master_key = random.split(master_key)
-        
-        summary = agent.run_episode(episode_key, episode_num=i)
-        all_summaries.append(summary)
-        
-        print(f"  Episode Summary:")
-        print(f"    Total Reward: {summary['total_reward']:.2f}")
-        print(f"    Rewards Collected: {summary['rewards_collected']}")
-        print(f"    Steps Taken: {summary['steps_taken']}")
-
     if len(all_summaries) > 1:
         print("\n" + "=" * 40)
         print("📊 Aggregate Experiment Results")

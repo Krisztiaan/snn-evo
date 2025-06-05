@@ -5,6 +5,8 @@ import h5py
 import numpy as np
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Union
+import json
+import zlib
 
 
 class ExperimentLoader:
@@ -15,25 +17,21 @@ class ExperimentLoader:
         path = Path(experiment_dir)
         
         # Check if it's a direct H5 file path
-        if path.suffix == '.h5':
+        if path.is_file() and path.suffix in ['.h5', '.hdf5']:
             self.h5_path = path
             self.experiment_dir = path.parent
         else:
             # It's a directory, look for H5 files
             self.experiment_dir = path
-            # Try different common names
-            for filename in ['experiment_data.h5', 'data.h5']:
-                potential_path = self.experiment_dir / filename
-                if potential_path.exists():
-                    self.h5_path = potential_path
-                    break
-            else:
-                # No standard file found, try to find any .h5 file
-                h5_files = list(self.experiment_dir.glob('*.h5'))
-                if h5_files:
-                    self.h5_path = h5_files[0]  # Use the first H5 file found
+            h5_files = list(self.experiment_dir.glob('*.h5')) + list(self.experiment_dir.glob('*.hdf5'))
+            if h5_files:
+                # Use the most common name first, otherwise the first found
+                if (self.experiment_dir / 'experiment_data.h5').exists():
+                    self.h5_path = self.experiment_dir / 'experiment_data.h5'
                 else:
-                    raise FileNotFoundError(f"No H5 data files found in {self.experiment_dir}")
+                    self.h5_path = h5_files[0]
+            else:
+                raise FileNotFoundError(f"No HDF5 data files found in {self.experiment_dir}")
             
         self.h5_file = h5py.File(self.h5_path, 'r')
         
@@ -46,9 +44,11 @@ class ExperimentLoader:
             if key.startswith('meta_'):
                 # User metadata
                 clean_key = key[5:]  # Remove 'meta_' prefix
-                if isinstance(value, str) and value.startswith('{'):
-                    import json
-                    metadata[clean_key] = json.loads(value)
+                if isinstance(value, str) and (value.startswith('{') or value.startswith('[')):
+                    try:
+                        metadata[clean_key] = json.loads(value)
+                    except json.JSONDecodeError:
+                        metadata[clean_key] = value
                 else:
                     metadata[clean_key] = value
             else:
@@ -71,8 +71,10 @@ class ExperimentLoader:
         git_info = {}
         for key, value in self.h5_file['git_info'].attrs.items():
             if isinstance(value, str) and value.startswith('['):
-                import json
-                git_info[key] = json.loads(value)
+                try:
+                    git_info[key] = json.loads(value)
+                except json.JSONDecodeError:
+                    git_info[key] = value
             else:
                 git_info[key] = value
         return git_info
@@ -85,7 +87,12 @@ class ExperimentLoader:
         code_files = {}
         code_group = self.h5_file['code_snapshot']
         for key, value in code_group.attrs.items():
-            if key != 'saved_files' and key != 'snapshot_time':
+            if key.endswith('_compressed'):
+                continue
+            if f'{key}_compressed' in code_group.attrs:
+                decompressed = zlib.decompress(value.tobytes())
+                code_files[key] = decompressed.decode('utf-8')
+            elif key not in ['saved_files', 'snapshot_time']:
                 code_files[key] = value
         return code_files
         
@@ -93,11 +100,20 @@ class ExperimentLoader:
         """Get experiment configuration."""
         config = {}
         if 'config' in self.h5_file:
-            for key, value in self.h5_file['config'].attrs.items():
-                # Parse JSON strings back to objects
-                if isinstance(value, str) and value.startswith('{'):
-                    import json
-                    config[key] = json.loads(value)
+            config_group = self.h5_file['config']
+            for key, value in config_group.attrs.items():
+                if key.endswith('_compressed'):
+                    continue
+                
+                if config_group.attrs.get(f'{key}_compressed'):
+                    # It's compressed JSON
+                    decompressed = zlib.decompress(value.tobytes())
+                    config[key] = json.loads(decompressed.decode('utf-8'))
+                elif isinstance(value, str) and (value.startswith('{') or value.startswith('[')):
+                    try:
+                        config[key] = json.loads(value)
+                    except json.JSONDecodeError:
+                        config[key] = value
                 else:
                     config[key] = value
         return config
@@ -149,15 +165,18 @@ class ExperimentLoader:
         episodes = []
         for name in self.h5_file['episodes'].keys():
             if name.startswith('episode_'):
-                episode_id = int(name.split('_')[1])
-                episodes.append(episode_id)
+                try:
+                    episode_id = int(name.split('_')[1])
+                    episodes.append(episode_id)
+                except (ValueError, IndexError):
+                    continue
         return sorted(episodes)
         
     def get_episode(self, episode_id: int) -> 'EpisodeData':
         """Get data for a specific episode."""
         episode_name = f'episode_{episode_id:04d}'
         if 'episodes' not in self.h5_file or episode_name not in self.h5_file['episodes']:
-            raise ValueError(f"Episode {episode_id} not found")
+            raise ValueError(f"Episode {episode_id} not found in {self.h5_path}")
             
         return EpisodeData(self.h5_file['episodes'][episode_name])
         
@@ -166,7 +185,16 @@ class ExperimentLoader:
         if 'episode_summaries' in self.h5_file:
             ep_name = f'episode_{episode_id:04d}'
             if ep_name in self.h5_file['episode_summaries']:
-                return dict(self.h5_file['episode_summaries'][ep_name].attrs)
+                summary = {}
+                for key, value in self.h5_file['episode_summaries'][ep_name].attrs.items():
+                    if isinstance(value, str) and (value.startswith('{') or value.startswith('[')):
+                        try:
+                            summary[key] = json.loads(value)
+                        except json.JSONDecodeError:
+                            summary[key] = value
+                    else:
+                        summary[key] = value
+                return summary
                 
         # Fallback to episode attributes
         episode = self.get_episode(episode_id)
@@ -182,6 +210,14 @@ class ExperimentLoader:
             
         return summaries
         
+    def get_all_checkpoints(self) -> Dict[str, Dict[str, np.ndarray]]:
+        """Load all checkpoints."""
+        checkpoints = {}
+        if 'checkpoints' in self.h5_file:
+            for name, group in self.h5_file['checkpoints'].items():
+                checkpoints[name] = {key: ds[:] for key, ds in group.items()}
+        return checkpoints
+
     def close(self):
         """Close HDF5 file."""
         self.h5_file.close()
@@ -245,19 +281,10 @@ class EpisodeData:
             values = spike_group['values'][:]
             
             # Expand RLE format
-            expanded_timesteps = []
-            expanded_values = []
-            
-            value_idx = 0
-            for t, count in zip(timesteps, counts):
-                for _ in range(count):
-                    expanded_timesteps.append(t)
-                    expanded_values.append(values[value_idx])
-                    value_idx += 1
-                    
+            expanded_timesteps = np.repeat(timesteps, counts)
             return {
-                'timesteps': np.array(expanded_timesteps),
-                'neuron_ids': np.array(expanded_values)
+                'timesteps': expanded_timesteps,
+                'neuron_ids': values
             }
         else:
             # Standard format
@@ -315,19 +342,10 @@ class EpisodeData:
             values = reward_group['values'][:]
             
             # Expand RLE format
-            expanded_timesteps = []
-            expanded_values = []
-            
-            value_idx = 0
-            for t, count in zip(timesteps, counts):
-                for _ in range(count):
-                    expanded_timesteps.append(t)
-                    expanded_values.append(values[value_idx])
-                    value_idx += 1
-                    
+            expanded_timesteps = np.repeat(timesteps, counts)
             return {
-                'timesteps': np.array(expanded_timesteps),
-                'rewards': np.array(expanded_values)
+                'timesteps': expanded_timesteps,
+                'rewards': values
             }
         else:
             # Standard format
@@ -390,6 +408,12 @@ class EpisodeData:
                 }
             return all_events
             
+    def get_static_data(self, name: str) -> Dict[str, np.ndarray]:
+        """Get static data saved for the episode."""
+        if name in self.group:
+            return {key: ds[:] for key, ds in self.group[name].items()}
+        return {}
+
     def get_final_state(self) -> Dict[str, np.ndarray]:
         """Get final state if saved."""
         if 'final_state' not in self.group:
