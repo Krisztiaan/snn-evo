@@ -22,7 +22,7 @@ def main():
                         help="Number of rewards")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--export-dir", type=str,
-                        default="experiments/models/random", help="Export directory")
+                        default="experiments/random", help="Export directory")
     parser.add_argument("--no-trajectory", action="store_true",
                         help="Don't export full trajectory")
 

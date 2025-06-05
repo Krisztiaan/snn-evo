@@ -41,15 +41,15 @@ def main():
     print("  - Real-time trajectory playback")
     print("  - Seamless HDF5 -> Visualization pipeline")
     print("\nStarting server...")
-    
+
     # Start browser in background
     browser_thread = Thread(
-        target=open_browser, 
-        args=("http://localhost:8000/grid_world_h5_viewer.html",)
+        target=open_browser,
+        args=("http://localhost:8000/grid_world_trajectory_viewer.html",)
     )
     browser_thread.daemon = True
     browser_thread.start()
-    
+
     # Run server (blocks)
     try:
         start_api_server()

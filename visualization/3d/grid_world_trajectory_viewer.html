@@ -353,6 +353,7 @@
             const speedSlider = document.getElementById('playSpeed');
             speedSlider.addEventListener('input', (e) => {
                 document.getElementById('speedDisplay').textContent = e.target.value + 'x';
+                updatePlaybackSpeed();
             });
             
             // Start animation loop
@@ -723,7 +724,7 @@
                 linewidth: 2
             });
             
-            trail = new THREE.Line(geometry, material);
+            trail = new THREE.LineSegments(geometry, material);
             scene.add(trail);
         }
         
@@ -731,8 +732,28 @@
             if (!trail || !showTrail || !trajectoryData) return;
             
             const positions = [];
+            const indices = [];
+            let currentSegmentStart = 0;
+            
             for (let i = 0; i <= currentStep && i < trajectoryData.trajectory.length; i++) {
                 const step = trajectoryData.trajectory[i];
+                
+                // Check for toroidal wrap
+                if (i > 0) {
+                    const prevStep = trajectoryData.trajectory[i - 1];
+                    const dx = Math.abs(step.agentPos[0] - prevStep.agentPos[0]);
+                    const dy = Math.abs(step.agentPos[1] - prevStep.agentPos[1]);
+                    
+                    // If movement is more than half the grid size, it's a wrap
+                    if (dx > CONFIG.gridSize / 2 || dy > CONFIG.gridSize / 2) {
+                        // Create line segment for previous continuous path
+                        for (let j = currentSegmentStart; j < positions.length / 3 - 1; j++) {
+                            indices.push(j, j + 1);
+                        }
+                        currentSegmentStart = positions.length / 3;
+                    }
+                }
+                
                 positions.push(
                     step.agentPos[0] + 0.5,
                     0.1,
@@ -740,9 +761,15 @@
                 );
             }
             
+            // Add final segment
+            for (let j = currentSegmentStart; j < positions.length / 3 - 1; j++) {
+                indices.push(j, j + 1);
+            }
+            
             trail.geometry.setAttribute('position', 
                 new THREE.Float32BufferAttribute(positions, 3)
             );
+            trail.geometry.setIndex(indices);
         }
         
         function setupVisualization() {
@@ -886,24 +913,42 @@
             
             if (isPlaying) {
                 playBtn.textContent = '⏸ Pause';
-                const speed = parseFloat(document.getElementById('playSpeed').value);
-                const interval = 100 / speed; // Base interval 100ms
-                
-                playInterval = setInterval(() => {
-                    if (currentStep < trajectoryData.metadata.totalSteps) {
-                        currentStep++;
-                        document.getElementById('timeline').value = currentStep;
-                        updateVisualization();
-                    } else {
-                        togglePlay(); // Stop at end
-                    }
-                }, interval);
+                startPlayback();
             } else {
                 playBtn.textContent = '▶ Play';
-                if (playInterval) {
-                    clearInterval(playInterval);
-                    playInterval = null;
+                stopPlayback();
+            }
+        };
+        
+        function startPlayback() {
+            if (!trajectoryData) return;
+            
+            const speed = parseFloat(document.getElementById('playSpeed').value);
+            const interval = 100 / speed; // Base interval 100ms
+            
+            playInterval = setInterval(() => {
+                if (currentStep < trajectoryData.metadata.totalSteps) {
+                    currentStep++;
+                    document.getElementById('timeline').value = currentStep;
+                    updateVisualization();
+                } else {
+                    togglePlay(); // Stop at end
                 }
+            }, interval);
+        }
+        
+        function stopPlayback() {
+            if (playInterval) {
+                clearInterval(playInterval);
+                playInterval = null;
+            }
+        }
+        
+        // Update playback speed dynamically
+        window.updatePlaybackSpeed = function() {
+            if (isPlaying) {
+                stopPlayback();
+                startPlayback();
             }
         };
         

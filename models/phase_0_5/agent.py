@@ -272,9 +272,8 @@ class SnnAgent:
         master_key = random.PRNGKey(self.config.exp_config.seed)
 
         with DataExporter(
-            experiment_name=Path(self.config.exp_config.export_dir).name,
-            output_base_dir=str(
-                Path(self.config.exp_config.export_dir).parent),
+            experiment_name="snn_agent_phase05",
+            output_base_dir=self.config.exp_config.export_dir,
             compression='gzip', compression_level=1
         ) as exporter:
 

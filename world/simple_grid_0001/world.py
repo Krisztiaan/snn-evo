@@ -19,7 +19,11 @@ class SimpleGridWorld:
     - JAX-optimized for performance
     """
     
-    def __init__(self, config: WorldConfig = WorldConfig()):
+    def __init__(self, config: WorldConfig = None, grid_size: int = 100):
+        if config is None:
+            config = WorldConfig(grid_size=grid_size)
+        else:
+            config = config._replace(grid_size=grid_size)
         self.config = config
         
     def reset(self, key: random.PRNGKey) -> Tuple[WorldState, Observation]:
@@ -227,10 +231,16 @@ class SimpleGridWorld:
         # Find minimum distance
         min_distance = jnp.min(masked_distances)
         
+        # Calculate decay constant so gradient reaches ~0.01 at half grid size
+        # exp(-distance/decay) = 0.01 when distance = grid_size/2
+        # -distance/decay = ln(0.01) ≈ -4.605
+        # decay = distance / 4.605 = (grid_size/2) / 4.605
+        decay_constant = self.config.grid_size / (2 * 4.605)
+        
         # Convert to gradient signal (handle case where all rewards collected)
         gradient = jnp.where(
             jnp.isfinite(min_distance),
-            jnp.exp(-min_distance / 10.0),
+            jnp.exp(-min_distance / decay_constant),
             0.0
         )
         
