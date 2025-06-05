@@ -1,0 +1,702 @@
+{
+  "metadata": {
+    "gridSize": 10,
+    "nRewards": 5,
+    "totalSteps": 36,
+    "totalReward": 84.0,
+    "rewardsCollected": 4,
+    "coverage": 0.29,
+    "seed": 42,
+    "sourcePath": "models/random/logs/episode_20250605_192815/data.h5"
+  },
+  "trajectory": [
+    {
+      "step": 0,
+      "agentPos": [
+        5,
+        5
+      ],
+      "observation": 0.7996295094490051,
+      "cumulativeReward": 0.0,
+      "rewardCollected": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "step": 1,
+      "agentPos": [
+        5,
+        4
+      ],
+      "observation": 0.868123471736908,
+      "cumulativeReward": 0.0,
+      "action": 0,
+      "reward": 2.5,
+      "rewardCollected": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "step": 2,
+      "agentPos": [
+        5,
+        3
+      ],
+      "observation": 0.904837429523468,
+      "cumulativeReward": 2.5,
+      "action": 0,
+      "reward": 2.5,
+      "rewardCollected": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "step": 3,
+      "agentPos": [
+        4,
+        3
+      ],
+      "observation": 0.7996295094490051,
+      "cumulativeReward": 5.0,
+      "action": 3,
+      "reward": 11.5,
+      "rewardCollected": [
+        false,
+        false,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 4,
+      "agentPos": [
+        5,
+        3
+      ],
+      "observation": 0.8187307715415955,
+      "cumulativeReward": 16.5,
+      "action": 1,
+      "reward": 2.0,
+      "rewardCollected": [
+        false,
+        false,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 5,
+      "agentPos": [
+        6,
+        3
+      ],
+      "observation": 0.904837429523468,
+      "cumulativeReward": 18.5,
+      "action": 1,
+      "reward": 2.0,
+      "rewardCollected": [
+        false,
+        false,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 6,
+      "agentPos": [
+        6,
+        2
+      ],
+      "observation": 0.868123471736908,
+      "cumulativeReward": 20.5,
+      "action": 0,
+      "reward": 2.0,
+      "rewardCollected": [
+        false,
+        false,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 7,
+      "agentPos": [
+        5,
+        2
+      ],
+      "observation": 0.904837429523468,
+      "cumulativeReward": 22.5,
+      "action": 3,
+      "reward": 1.5,
+      "rewardCollected": [
+        false,
+        false,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 8,
+      "agentPos": [
+        4,
+        2
+      ],
+      "observation": 0.868123471736908,
+      "cumulativeReward": 24.0,
+      "action": 3,
+      "reward": 1.5,
+      "rewardCollected": [
+        false,
+        false,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 9,
+      "agentPos": [
+        4,
+        1
+      ],
+      "observation": 0.904837429523468,
+      "cumulativeReward": 25.5,
+      "action": 0,
+      "reward": 1.5,
+      "rewardCollected": [
+        false,
+        false,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 10,
+      "agentPos": [
+        5,
+        1
+      ],
+      "observation": 0.7536383271217346,
+      "cumulativeReward": 27.0,
+      "action": 1,
+      "reward": 20.5,
+      "rewardCollected": [
+        false,
+        true,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 11,
+      "agentPos": [
+        5,
+        0
+      ],
+      "observation": 0.6972891688346863,
+      "cumulativeReward": 47.5,
+      "action": 0,
+      "reward": 0.5,
+      "rewardCollected": [
+        false,
+        true,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 12,
+      "agentPos": [
+        5,
+        9
+      ],
+      "observation": 0.6394073367118835,
+      "cumulativeReward": 48.0,
+      "action": 0,
+      "reward": 0.5,
+      "rewardCollected": [
+        false,
+        true,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 13,
+      "agentPos": [
+        6,
+        9
+      ],
+      "observation": 0.6621186137199402,
+      "cumulativeReward": 48.5,
+      "action": 1,
+      "reward": 0.5,
+      "rewardCollected": [
+        false,
+        true,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 14,
+      "agentPos": [
+        6,
+        8
+      ],
+      "observation": 0.6542510986328125,
+      "cumulativeReward": 49.0,
+      "action": 0,
+      "reward": 0.5,
+      "rewardCollected": [
+        false,
+        true,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 15,
+      "agentPos": [
+        7,
+        8
+      ],
+      "observation": 0.6972891688346863,
+      "cumulativeReward": 49.5,
+      "action": 1,
+      "reward": 0.5,
+      "rewardCollected": [
+        false,
+        true,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 16,
+      "agentPos": [
+        7,
+        7
+      ],
+      "observation": 0.7536383271217346,
+      "cumulativeReward": 50.0,
+      "action": 0,
+      "reward": 1.0,
+      "rewardCollected": [
+        false,
+        true,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 17,
+      "agentPos": [
+        8,
+        7
+      ],
+      "observation": 0.7996295094490051,
+      "cumulativeReward": 51.0,
+      "action": 1,
+      "reward": 1.0,
+      "rewardCollected": [
+        false,
+        true,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 18,
+      "agentPos": [
+        9,
+        7
+      ],
+      "observation": 0.8187307715415955,
+      "cumulativeReward": 52.0,
+      "action": 1,
+      "reward": 1.0,
+      "rewardCollected": [
+        false,
+        true,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 19,
+      "agentPos": [
+        9,
+        8
+      ],
+      "observation": 0.740818202495575,
+      "cumulativeReward": 53.0,
+      "action": 2,
+      "reward": 0.5,
+      "rewardCollected": [
+        false,
+        true,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 20,
+      "agentPos": [
+        8,
+        8
+      ],
+      "observation": 0.7288933992385864,
+      "cumulativeReward": 53.5,
+      "action": 3,
+      "reward": 0.5,
+      "rewardCollected": [
+        false,
+        true,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 21,
+      "agentPos": [
+        8,
+        7
+      ],
+      "observation": 0.7996295094490051,
+      "cumulativeReward": 54.0,
+      "action": 0,
+      "reward": 1.0,
+      "rewardCollected": [
+        false,
+        true,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 22,
+      "agentPos": [
+        8,
+        6
+      ],
+      "observation": 0.868123471736908,
+      "cumulativeReward": 55.0,
+      "action": 0,
+      "reward": 1.0,
+      "rewardCollected": [
+        false,
+        true,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 23,
+      "agentPos": [
+        8,
+        7
+      ],
+      "observation": 0.7996295094490051,
+      "cumulativeReward": 56.0,
+      "action": 2,
+      "reward": 1.0,
+      "rewardCollected": [
+        false,
+        true,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 24,
+      "agentPos": [
+        9,
+        7
+      ],
+      "observation": 0.8187307715415955,
+      "cumulativeReward": 57.0,
+      "action": 1,
+      "reward": 1.0,
+      "rewardCollected": [
+        false,
+        true,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 25,
+      "agentPos": [
+        9,
+        6
+      ],
+      "observation": 0.904837429523468,
+      "cumulativeReward": 58.0,
+      "action": 0,
+      "reward": 1.0,
+      "rewardCollected": [
+        false,
+        true,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 26,
+      "agentPos": [
+        9,
+        5
+      ],
+      "observation": 0.7536383271217346,
+      "cumulativeReward": 59.0,
+      "action": 0,
+      "reward": 10.5,
+      "rewardCollected": [
+        true,
+        true,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 27,
+      "agentPos": [
+        9,
+        4
+      ],
+      "observation": 0.7996295094490051,
+      "cumulativeReward": 69.5,
+      "action": 0,
+      "reward": 0.5,
+      "rewardCollected": [
+        true,
+        true,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 28,
+      "agentPos": [
+        8,
+        4
+      ],
+      "observation": 0.868123471736908,
+      "cumulativeReward": 70.0,
+      "action": 3,
+      "reward": 0.5,
+      "rewardCollected": [
+        true,
+        true,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 29,
+      "agentPos": [
+        8,
+        5
+      ],
+      "observation": 0.7996295094490051,
+      "cumulativeReward": 70.5,
+      "action": 2,
+      "reward": 0.5,
+      "rewardCollected": [
+        true,
+        true,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 30,
+      "agentPos": [
+        9,
+        5
+      ],
+      "observation": 0.7536383271217346,
+      "cumulativeReward": 71.0,
+      "action": 1,
+      "reward": 0.5,
+      "rewardCollected": [
+        true,
+        true,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 31,
+      "agentPos": [
+        8,
+        5
+      ],
+      "observation": 0.7996295094490051,
+      "cumulativeReward": 71.5,
+      "action": 3,
+      "reward": 0.5,
+      "rewardCollected": [
+        true,
+        true,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 32,
+      "agentPos": [
+        8,
+        4
+      ],
+      "observation": 0.868123471736908,
+      "cumulativeReward": 72.0,
+      "action": 0,
+      "reward": 0.5,
+      "rewardCollected": [
+        true,
+        true,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 33,
+      "agentPos": [
+        8,
+        5
+      ],
+      "observation": 0.7996295094490051,
+      "cumulativeReward": 72.5,
+      "action": 2,
+      "reward": 0.5,
+      "rewardCollected": [
+        true,
+        true,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 34,
+      "agentPos": [
+        7,
+        5
+      ],
+      "observation": 0.8187307715415955,
+      "cumulativeReward": 73.0,
+      "action": 3,
+      "reward": 0.5,
+      "rewardCollected": [
+        true,
+        true,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 35,
+      "agentPos": [
+        7,
+        4
+      ],
+      "observation": 0.904837429523468,
+      "cumulativeReward": 73.5,
+      "action": 0,
+      "reward": 0.5,
+      "rewardCollected": [
+        true,
+        true,
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "step": 36,
+      "agentPos": [
+        7,
+        3
+      ],
+      "observation": 0.0,
+      "cumulativeReward": 74.0,
+      "action": 0,
+      "reward": 10.0,
+      "rewardCollected": [
+        true,
+        true,
+        true,
+        false,
+        true
+      ]
+    }
+  ],
+  "world": {
+    "rewardPositions": [
+      [
+        9,
+        5
+      ],
+      [
+        5,
+        1
+      ],
+      [
+        7,
+        3
+      ],
+      [
+        5,
+        1
+      ],
+      [
+        4,
+        3
+      ]
+    ]
+  }
+}

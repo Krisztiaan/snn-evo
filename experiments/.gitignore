@@ -1,0 +1,5 @@
+# Ignore all experiment data
+*
+# Except this file and README
+!.gitignore
+!README.md

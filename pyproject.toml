@@ -1,0 +1,92 @@
+# pyproject.toml
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "metalearning"
+version = "0.5.0"
+description = "Meta-learning with evolving spiking neural networks"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [
+    { name = "Ferencz Krisztián", email = "snn@krisz.me" },
+]
+keywords = ["snn", "spiking-neural-networks", "meta-learning", "computational-neuroscience", "evolutionary-algorithms"]
+
+# This is the main list of dependencies, directly under [project]
+dependencies = [
+    "numpy>=1.20",
+    "jax>=0.4.0",
+    "jaxlib>=0.4.0",
+    "h5py>=3.0",
+    "matplotlib>=3.5",
+    "scipy>=1.7",
+    "tqdm>=4.60",
+]
+
+# Project URLs are a separate table
+[project.urls]
+Homepage = "https://github.com/krisztiaan/evo-snn"
+Repository = "https://github.com/krisztiaan/evo-snn"
+
+[project.optional-dependencies]
+# Dependencies for development: linting, formatting, testing
+dev = [
+    "ruff",
+    "pytest>=7.0",
+    "pytest-xdist",
+    "mypy>=0.900",
+    "pre-commit",
+]
+
+# Dependencies for the Brian2-based models
+brian2 = [
+    "brian2>=2.5",
+    "brian2cuda; sys_platform != 'win32'",
+]
+
+# Dependencies for advanced visualization
+visualization = [
+    "plotly>=5.0",
+    "seaborn>=0.11",
+    "networkx>=2.6",
+]
+
+# A combined extra for setting up a full development environment
+all = [
+    "metalearning[dev,brian2,visualization]",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+exclude = ["experiments*", "notebooks*", "tests*"]
+
+# --- Tool Configuration ---
+
+[tool.ruff]
+line-length = 100
+target-version = "py38"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]
+ignore = []
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+exclude = [".venv", "venv", "build"]
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q"
+testpaths = [
+    "tests",
+]
