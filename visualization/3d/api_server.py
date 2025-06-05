@@ -124,6 +124,8 @@ class ExperimentAPIHandler(BaseHTTPRequestHandler):
                 rewards_log = episode.get_rewards()
                 world_setup = episode.get_static_data("world_setup")
                 reward_positions = world_setup.get("reward_positions", [])
+                neural_states = episode.get_neural_states()
+                spike_data = episode.get_spikes()  # Get sparse spike data
 
                 world_config = config.get('world_config', {})
 
@@ -148,6 +150,25 @@ class ExperimentAPIHandler(BaseHTTPRequestHandler):
                 rewards_collected_mask = np.zeros(
                     len(reward_positions), dtype=bool)
 
+                # Process neural states if available
+                has_neural_data = neural_states and 'v' in neural_states
+                
+                # Pre-process spike data to count spikes per timestep
+                spike_counts_per_step = {}
+                if spike_data and 'timesteps' in spike_data:
+                    spike_timesteps = spike_data['timesteps']
+                    for t in spike_timesteps:
+                        spike_counts_per_step[t] = spike_counts_per_step.get(t, 0) + 1
+                
+                # Get network size for proper normalization
+                network_params = config.get('network_params', {})
+                total_neurons = network_params.get('n_exc', 0) + network_params.get('n_inh', 0)
+                if total_neurons == 0:
+                    # Fallback for phase_0_8 config structure
+                    total_neurons = (network_params.get('NUM_SENSORY', 32) + 
+                                   network_params.get('NUM_PROCESSING', 192) + 
+                                   network_params.get('NUM_READOUT', 32))
+                
                 for i in range(len(positions)):
                     step_reward = 0.0
                     if rewards_log and 'timesteps' in rewards_log:
@@ -174,6 +195,27 @@ class ExperimentAPIHandler(BaseHTTPRequestHandler):
                         'cumulativeReward': cumulative_reward,
                         'rewardCollected': rewards_collected_mask.tolist()
                     }
+                    
+                    # Add neural activity metrics if available
+                    if has_neural_data and i < len(neural_states['v']):
+                        # Calculate mean membrane potential
+                        v_values = neural_states['v'][i]
+                        
+                        # Get spike count from sparse data
+                        spike_count = spike_counts_per_step.get(i, 0)
+                        
+                        # Calculate instantaneous firing rate (spikes/neuron/ms -> Hz)
+                        # dt = 1ms assumed for all phases
+                        firing_rate_hz = (spike_count / total_neurons) * 1000.0 if total_neurons > 0 else 0.0
+                        
+                        step_data['neuralActivity'] = {
+                            'meanPotential': float(np.mean(v_values)),
+                            'spikeCount': spike_count,
+                            'firingRateHz': firing_rate_hz,
+                            'maxPotential': float(np.max(v_values)),
+                            'minPotential': float(np.min(v_values))
+                        }
+                    
                     viz_data['trajectory'].append(step_data)
 
                 summary = loader.get_episode_summary(episode_id)

@@ -24,9 +24,10 @@
             top: 10px;
             left: 10px;
             color: white;
-            background: rgba(0, 0, 0, 0.7);
+            background: rgba(20, 20, 20, 0.9);
             padding: 15px;
-            border-radius: 5px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 107, 0, 0.3);
             font-size: 14px;
             max-width: 300px;
         }
@@ -36,9 +37,10 @@
             top: 10px;
             right: 10px;
             color: white;
-            background: rgba(0, 0, 0, 0.7);
+            background: rgba(20, 20, 20, 0.9);
             padding: 15px;
-            border-radius: 5px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 107, 0, 0.3);
             font-size: 14px;
             width: 300px;
             max-height: 90vh;
@@ -49,7 +51,7 @@
             display: block;
             margin: 5px 0;
             padding: 8px 15px;
-            background: #2196F3;
+            background: #FF6B00;  /* Aperture orange */
             color: white;
             border: none;
             border-radius: 3px;
@@ -58,7 +60,7 @@
         }
         
         #controls button:hover {
-            background: #1976D2;
+            background: #E85A00;  /* Darker orange */
         }
         
         #controls button:disabled {
@@ -78,7 +80,7 @@
         
         h3 {
             margin-top: 0;
-            color: #2196F3;
+            color: #FF6B00;
         }
         
         #loadingOverlay {
@@ -150,7 +152,7 @@
         }
         
         .experiment-item.selected {
-            background: #1976D2;
+            background: #E85A00;  /* Darker orange */
             border-color: #2196F3;
         }
         
@@ -184,6 +186,72 @@
             color: white;
             border: 1px solid #555;
         }
+        
+        #analytics {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            right: 320px;
+            height: 250px;
+            background: rgba(20, 20, 20, 0.9);
+            border-radius: 8px;
+            border: 1px solid rgba(255, 107, 0, 0.3);
+            padding: 15px;
+            display: none;
+            overflow: hidden;
+        }
+        
+        .analytics-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        
+        .analytics-tab {
+            padding: 5px 15px;
+            background: #333;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        
+        .analytics-tab.active {
+            background: #FF6B00;  /* Aperture orange */
+        }
+        
+        .analytics-content {
+            height: calc(100% - 40px);
+            position: relative;
+        }
+        
+        .chart-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: none;
+        }
+        
+        .chart-container.active {
+            display: block;
+        }
+        
+        #toggleAnalytics {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            padding: 5px 10px;
+            background: #FF6B00;  /* Aperture orange */
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+            z-index: 10;
+        }
     </style>
 </head>
 <body>
@@ -209,6 +277,27 @@
         <div id="gradientValue" style="text-align: center;">0.000</div>
         <br>
         <div class="label">Controls: Left click + drag to rotate, right click + drag to pan, scroll to zoom</div>
+    </div>
+    
+    <button id="toggleAnalytics" onclick="toggleAnalytics()">📊 Toggle Analytics</button>
+    
+    <div id="analytics">
+        <div class="analytics-tabs">
+            <button class="analytics-tab active" onclick="switchAnalyticsTab('rewards')">Reward Stats</button>
+            <button class="analytics-tab" onclick="switchAnalyticsTab('timing')">Timing Analysis</button>
+            <button class="analytics-tab" onclick="switchAnalyticsTab('network')">Network Dynamics</button>
+        </div>
+        <div class="analytics-content">
+            <div id="rewardsChart" class="chart-container active">
+                <canvas id="rewardsCanvas"></canvas>
+            </div>
+            <div id="timingChart" class="chart-container">
+                <canvas id="timingCanvas"></canvas>
+            </div>
+            <div id="networkChart" class="chart-container">
+                <canvas id="networkCanvas"></canvas>
+            </div>
+        </div>
     </div>
     
     <div id="controls">
@@ -264,6 +353,8 @@
         </label>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    
     <script type="importmap">
         {
             "imports": {
@@ -290,6 +381,23 @@
         let rewardGlows = [];
         let experimentsByModel = {};
         let selectedExperiment = null;
+        let agentTargetPosition = new THREE.Vector3();
+        let agentPreviousPosition = new THREE.Vector3();
+        let agentTargetRotation = 0;
+        let collectedRewardAnimations = [];
+        
+        // Analytics variables
+        let rewardsChart = null;
+        let timingChart = null;
+        let networkChart = null;
+        let analyticsData = {
+            steps: [],
+            cumulativeRewards: [],
+            rewardTimestamps: [],
+            timeBetweenRewards: [],
+            gradientValues: [],
+            neuralActivity: []
+        };
         
         // Configuration
         let CONFIG = {
@@ -298,14 +406,16 @@
             wallHeight: 3,
             agentSize: 0.6,
             rewardSize: 0.3,
-            agentColor: 0xFFD700,  // Gold/Yellow
-            rewardColor: 0xFF0000,  // Red
-            collectedRewardColor: 0x666666,  // Dark gray
-            floorColor: 0x404040,   // Dark gray
-            wallColor: 0xCCCCCC,    // Light gray
-            gridLineColor: 0x606060, // Medium gray
-            trailColor: 0x00FF00,   // Green
-            trailOpacity: 0.5
+            agentColor: 0xF5F5F5,  // Clean white
+            agentCoreColor: 0xFF6B00,  // Aperture orange
+            rewardColor: 0x00A8E8,  // Aperture blue
+            rewardGlowColor: 0x00D4FF,  // Bright blue glow
+            collectedRewardColor: 0x333333,  // Dark gray
+            floorColor: 0xFFFFFF,   // White floor
+            wallColor: 0xF0F0F0,    // Clean white walls
+            gridLineColor: 0x808080, // Gray grid lines
+            trailColor: 0xFF6B00,   // Orange trail
+            trailOpacity: 0.6
         };
         
         // Initialize the scene
@@ -314,7 +424,7 @@
             
             // Scene
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x1a1a1a);
+            scene.background = new THREE.Color(0xF0F0F0);  // Soft white
             
             // Camera
             const aspect = window.innerWidth / window.innerHeight;
@@ -387,12 +497,55 @@
                 
                 if (data.model_count === 0) {
                     modelSelect.innerHTML = '<option value="">No models found</option>';
+                } else {
+                    // Auto-load the latest model's latest run
+                    autoLoadLatestRun(experimentsByModel);
                 }
             } catch (error) {
                 console.error('Error loading experiments:', error);
                 modelSelect.innerHTML = '<option value="">Error loading models</option>';
                 document.getElementById('loadingOverlay').style.display = 'none';
             }
+        }
+        
+        async function autoLoadLatestRun(models) {
+            // Find the latest model (highest phase number)
+            const modelNames = Object.keys(models).sort();
+            const latestModel = modelNames[modelNames.length - 1];
+            
+            if (!latestModel) return;
+            
+            // Set the model selector
+            document.getElementById('modelSelect').value = latestModel;
+            selectModel();
+            
+            // Wait a bit for the experiment list to populate
+            setTimeout(() => {
+                // Find the latest run (assuming they're sorted by timestamp)
+                const experiments = experimentsByModel[latestModel];
+                if (experiments && experiments.length > 0) {
+                    // Get the latest experiment (last in the list)
+                    const latestExp = experiments[experiments.length - 1];
+                    
+                    // Select and load it
+                    selectedExperiment = latestExp;
+                    
+                    // Find and click the experiment div
+                    const expDivs = document.querySelectorAll('#experimentList > div');
+                    if (expDivs.length > 0) {
+                        const lastExpDiv = expDivs[expDivs.length - 1];
+                        lastExpDiv.click(); // This will trigger selectExperiment
+                        
+                        // Load the first episode after a short delay
+                        setTimeout(() => {
+                            if (document.getElementById('episodeSelect').options.length > 1) {
+                                document.getElementById('episodeSelect').selectedIndex = 1;
+                                loadEpisode();
+                            }
+                        }, 100);
+                    }
+                }
+            }, 100);
         }
         
         window.selectModel = function() {
@@ -493,13 +646,13 @@
         };
         
         function setupLights() {
-            // Ambient light
-            const ambientLight = new THREE.AmbientLight(0x404040, 1);
+            // Soft ambient light for even illumination
+            const ambientLight = new THREE.AmbientLight(0xFFFFFF, 0.8);
             scene.add(ambientLight);
             
-            // Directional light (sun)
-            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-            directionalLight.position.set(10, 15, 5);
+            // Subtle directional light from above
+            const directionalLight = new THREE.DirectionalLight(0xFFFFFF, 0.4);
+            directionalLight.position.set(5, 20, 5);
             directionalLight.castShadow = true;
             directionalLight.shadow.camera.left = -15;
             directionalLight.shadow.camera.right = 15;
@@ -509,10 +662,11 @@
             directionalLight.shadow.camera.far = 50;
             directionalLight.shadow.mapSize.width = 2048;
             directionalLight.shadow.mapSize.height = 2048;
+            directionalLight.shadow.bias = -0.001;
             scene.add(directionalLight);
             
-            // Point light for agent glow
-            const agentLight = new THREE.PointLight(0xFFD700, 0.5, 5);
+            // Very subtle point light for agent glow
+            const agentLight = new THREE.PointLight(CONFIG.agentCoreColor, 0.3, 3);
             agentLight.position.set(5, 1, 5);
             scene.add(agentLight);
         }
@@ -534,8 +688,8 @@
             );
             const floorMaterial = new THREE.MeshPhongMaterial({ 
                 color: CONFIG.floorColor,
-                specular: 0x111111,
-                shininess: 10
+                specular: 0x404040,  // Much less reflective
+                shininess: 10        // Matte finish
             });
             const floor = new THREE.Mesh(floorGeometry, floorMaterial);
             floor.position.set(CONFIG.gridSize / 2, -0.05, CONFIG.gridSize / 2);
@@ -544,6 +698,9 @@
             
             // Grid lines
             createGridLines();
+            
+            // Add walls
+            createWalls();
             
             scene.add(gridWorld);
             
@@ -573,7 +730,8 @@
             const lineMaterial = new THREE.LineBasicMaterial({ 
                 color: CONFIG.gridLineColor,
                 transparent: true,
-                opacity: 0.3
+                opacity: 0.8,
+                linewidth: 2
             });
             
             // For large grids, reduce line density
@@ -621,28 +779,149 @@
             gridWorld.add(gridLines);
         }
         
+        function createWalls() {
+            // Create platform sides (walls underneath)
+            const platformMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0x808080, // Gray platform sides
+                specular: 0x404040,
+                shininess: 30
+            });
+            
+            const platformDepth = 2; // Depth of platform below floor
+            const wallThickness = 0.3;
+            
+            // North side
+            const northSide = new THREE.Mesh(
+                new THREE.BoxGeometry(CONFIG.gridSize * CONFIG.cellSize + wallThickness * 2, platformDepth, wallThickness),
+                platformMaterial
+            );
+            northSide.position.set(CONFIG.gridSize / 2, -platformDepth / 2, -wallThickness / 2);
+            northSide.castShadow = true;
+            northSide.receiveShadow = true;
+            gridWorld.add(northSide);
+            
+            // South side
+            const southSide = new THREE.Mesh(
+                new THREE.BoxGeometry(CONFIG.gridSize * CONFIG.cellSize + wallThickness * 2, platformDepth, wallThickness),
+                platformMaterial
+            );
+            southSide.position.set(CONFIG.gridSize / 2, -platformDepth / 2, CONFIG.gridSize + wallThickness / 2);
+            southSide.castShadow = true;
+            southSide.receiveShadow = true;
+            gridWorld.add(southSide);
+            
+            // East side
+            const eastSide = new THREE.Mesh(
+                new THREE.BoxGeometry(wallThickness, platformDepth, CONFIG.gridSize * CONFIG.cellSize + wallThickness * 2),
+                platformMaterial
+            );
+            eastSide.position.set(CONFIG.gridSize + wallThickness / 2, -platformDepth / 2, CONFIG.gridSize / 2);
+            eastSide.castShadow = true;
+            eastSide.receiveShadow = true;
+            gridWorld.add(eastSide);
+            
+            // West side
+            const westSide = new THREE.Mesh(
+                new THREE.BoxGeometry(wallThickness, platformDepth, CONFIG.gridSize * CONFIG.cellSize + wallThickness * 2),
+                platformMaterial
+            );
+            westSide.position.set(-wallThickness / 2, -platformDepth / 2, CONFIG.gridSize / 2);
+            westSide.castShadow = true;
+            westSide.receiveShadow = true;
+            gridWorld.add(westSide);
+            
+            // Bottom of platform
+            const bottomGeometry = new THREE.BoxGeometry(
+                CONFIG.gridSize * CONFIG.cellSize + wallThickness * 2,
+                0.1,
+                CONFIG.gridSize * CONFIG.cellSize + wallThickness * 2
+            );
+            const bottom = new THREE.Mesh(bottomGeometry, platformMaterial);
+            bottom.position.set(CONFIG.gridSize / 2, -platformDepth, CONFIG.gridSize / 2);
+            bottom.receiveShadow = true;
+            gridWorld.add(bottom);
+        }
         
         function createAgent(position = [5, 0.3, 5]) {
             if (agent) {
                 scene.remove(agent);
             }
             
-            // Create rounded box geometry
+            // Create agent group
+            agent = new THREE.Group();
+            
+            // Create rounded box body (bright orange)
             const roundedBoxGeometry = createRoundedBoxGeometry(CONFIG.agentSize, CONFIG.agentSize, CONFIG.agentSize, 0.1, 2);
-            const material = new THREE.MeshPhongMaterial({ 
-                color: CONFIG.agentColor,
-                emissive: CONFIG.agentColor,
+            const bodyMaterial = new THREE.MeshPhongMaterial({ 
+                color: CONFIG.agentCoreColor, // Bright orange
+                emissive: CONFIG.agentCoreColor,
                 emissiveIntensity: 0.2,
                 specular: 0xFFFFFF,
                 shininess: 100
             });
-            agent = new THREE.Mesh(roundedBoxGeometry, material);
+            const body = new THREE.Mesh(roundedBoxGeometry, bodyMaterial);
+            body.castShadow = true;
+            agent.add(body);
+            
+            // Add eyes
+            const eyeGeometry = new THREE.SphereGeometry(CONFIG.agentSize * 0.08, 8, 8);
+            const eyeMaterial = new THREE.MeshPhongMaterial({
+                color: 0x000000,
+                specular: 0xFFFFFF,
+                shininess: 100
+            });
+            
+            // Left eye
+            const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+            leftEye.position.set(-CONFIG.agentSize * 0.2, CONFIG.agentSize * 0.15, CONFIG.agentSize * 0.51);
+            agent.add(leftEye);
+            
+            // Right eye
+            const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+            rightEye.position.set(CONFIG.agentSize * 0.2, CONFIG.agentSize * 0.15, CONFIG.agentSize * 0.51);
+            agent.add(rightEye);
+            
             agent.position.set(...position);
-            agent.castShadow = true;
             scene.add(agent);
         }
         
         // Helper function to create rounded box geometry
+        function createCollectionAnimation(reward, index) {
+            const animation = {
+                reward: reward,
+                glow: rewardGlows[index],
+                startTime: Date.now(),
+                duration: 800,
+                startScale: 1,
+                endScale: 2,
+                startOpacity: reward.material.opacity,
+                particles: []
+            };
+            
+            // Create particle burst
+            for (let i = 0; i < 10; i++) {
+                const particleGeometry = new THREE.SphereGeometry(0.05, 4, 4);
+                const particleMaterial = new THREE.MeshBasicMaterial({
+                    color: CONFIG.rewardGlowColor,
+                    transparent: true,
+                    opacity: 0.8
+                });
+                const particle = new THREE.Mesh(particleGeometry, particleMaterial);
+                particle.position.copy(reward.position);
+                particle.userData = {
+                    velocity: new THREE.Vector3(
+                        (Math.random() - 0.5) * 0.1,
+                        Math.random() * 0.2 + 0.1,
+                        (Math.random() - 0.5) * 0.1
+                    )
+                };
+                scene.add(particle);
+                animation.particles.push(particle);
+            }
+            
+            collectedRewardAnimations.push(animation);
+        }
+        
         function createRoundedBoxGeometry(width, height, depth, radius, smoothness) {
             const shape = new THREE.Shape();
             const eps = 0.00001;
@@ -678,30 +957,32 @@
             // Reduce sphere complexity for large grids
             const segments = CONFIG.gridSize > 20 ? 8 : 16;
             
-            // Create new rewards as spheres
+            // Create new rewards as energy orbs
             positions.forEach((pos, index) => {
                 const geometry = new THREE.SphereGeometry(CONFIG.rewardSize / 2, segments, segments);
                 const material = new THREE.MeshPhongMaterial({ 
                     color: CONFIG.rewardColor,
                     emissive: CONFIG.rewardColor,
-                    emissiveIntensity: 0.3,
+                    emissiveIntensity: 0.5,
                     specular: 0xFFFFFF,
-                    shininess: 50
+                    shininess: 200,
+                    transparent: true,
+                    opacity: 0.9
                 });
                 const reward = new THREE.Mesh(geometry, material);
-                reward.position.set(pos[0] + 0.5, CONFIG.rewardSize / 2, pos[1] + 0.5);
+                reward.position.set(pos[0] + 0.5, CONFIG.rewardSize / 2 + 0.3, pos[1] + 0.5);
                 reward.castShadow = CONFIG.gridSize <= 20; // Disable shadows for large grids
-                reward.userData = { collected: false, originalY: CONFIG.rewardSize / 2, index: index };
+                reward.userData = { collected: false, originalY: CONFIG.rewardSize / 2 + 0.3, index: index };
                 rewards.push(reward);
                 scene.add(reward);
                 
-                // Only add glow effect for smaller grids
+                // Add glow effect
                 if (CONFIG.gridSize <= 20) {
-                    const glowGeometry = new THREE.SphereGeometry(0.6, 8, 8);
+                    const glowGeometry = new THREE.SphereGeometry(CONFIG.rewardSize * 0.8, 8, 8);
                     const glowMaterial = new THREE.MeshBasicMaterial({
-                        color: CONFIG.rewardColor,
+                        color: CONFIG.rewardGlowColor,
                         transparent: true,
-                        opacity: 0.2
+                        opacity: 0.3
                     });
                     const glow = new THREE.Mesh(glowGeometry, glowMaterial);
                     glow.position.copy(reward.position);
@@ -793,6 +1074,11 @@
             const initialPos = trajectoryData.trajectory[0].agentPos;
             createAgent([initialPos[0] + 0.5, CONFIG.agentSize / 2, initialPos[1] + 0.5]);
             
+            // Initialize agent position tracking
+            agentTargetPosition.set(initialPos[0] + 0.5, CONFIG.agentSize / 2, initialPos[1] + 0.5);
+            agentPreviousPosition.copy(agentTargetPosition);
+            agentTargetRotation = 0;
+            
             // Create trail
             createTrail();
             
@@ -801,6 +1087,9 @@
             timeline.max = meta.totalSteps;
             timeline.value = 0;
             currentStep = 0;
+            
+            // Process analytics data
+            processAnalyticsData();
             
             // Update display
             updateVisualization();
@@ -811,21 +1100,35 @@
             
             const stepData = trajectoryData.trajectory[currentStep];
             
-            // Update agent position
+            // Update agent target position for smooth movement
             if (agent) {
-                agent.position.x = stepData.agentPos[0] + 0.5;
-                agent.position.z = stepData.agentPos[1] + 0.5;
+                // Store previous position for direction calculation
+                agentPreviousPosition.copy(agentTargetPosition);
+                
+                agentTargetPosition.set(
+                    stepData.agentPos[0] + 0.5,
+                    agent.position.y,
+                    stepData.agentPos[1] + 0.5
+                );
+                
+                // Calculate direction based on movement
+                const dx = agentTargetPosition.x - agentPreviousPosition.x;
+                const dz = agentTargetPosition.z - agentPreviousPosition.z;
+                
+                // Only update rotation if there's actual movement
+                if (Math.abs(dx) > 0.01 || Math.abs(dz) > 0.01) {
+                    // Calculate angle (0 = facing +Z, PI/2 = facing +X, etc.)
+                    agentTargetRotation = Math.atan2(dx, dz);
+                }
             }
             
-            // Update rewards collected status
+            // Update rewards collected status with animation
             if (stepData.rewardCollected) {
                 stepData.rewardCollected.forEach((collected, index) => {
-                    if (rewards[index]) {
-                        rewards[index].visible = !collected;
-                        if (rewardGlows[index]) {
-                            rewardGlows[index].visible = !collected;
-                        }
-                        rewards[index].userData.collected = collected;
+                    if (rewards[index] && collected && !rewards[index].userData.collected) {
+                        // Trigger collection animation for newly collected rewards
+                        createCollectionAnimation(rewards[index], index);
+                        rewards[index].userData.collected = true;
                     }
                 });
             }
@@ -853,6 +1156,12 @@
             // Update step display
             document.getElementById('stepDisplay').textContent = 
                 `Step: ${currentStep} / ${trajectoryData.metadata.totalSteps}`;
+                
+            // Update analytics if visible
+            const analyticsPanel = document.getElementById('analytics');
+            if (analyticsPanel.style.display === 'block') {
+                updateAnalyticsCharts();
+            }
         }
         
         function animate() {
@@ -861,12 +1170,40 @@
             // Update controls
             controls.update();
             
+            // Smooth agent movement
+            if (agent && agentTargetPosition) {
+                agent.position.lerp(agentTargetPosition, 0.15);
+                
+                // Smooth rotation
+                const currentRotation = agent.rotation.y;
+                const rotationDiff = agentTargetRotation - currentRotation;
+                
+                // Handle rotation wrap-around
+                let shortestDiff = rotationDiff;
+                if (Math.abs(rotationDiff) > Math.PI) {
+                    shortestDiff = rotationDiff - Math.sign(rotationDiff) * 2 * Math.PI;
+                }
+                
+                agent.rotation.y += shortestDiff * 0.2; // Smooth rotation lerp
+                
+                // Update agent light position
+                const agentLight = scene.children.find(child => child.isPointLight && child.color.getHex() === CONFIG.agentCoreColor);
+                if (agentLight) {
+                    agentLight.position.copy(agent.position);
+                    agentLight.position.y += 1;
+                }
+                
+                // Add subtle bounce to agent
+                const bounce = Math.sin(Date.now() * 0.003) * 0.02;
+                agent.position.y = agentTargetPosition.y + bounce;
+            }
+            
             // Animate rewards (floating effect) - reduced for large grids
             const time = Date.now() * 0.001;
             if (CONFIG.gridSize <= 20) {
                 rewards.forEach((reward, index) => {
                     if (!reward.userData.collected) {
-                        reward.position.y = reward.userData.originalY + Math.sin(time * 2 + index) * 0.05;
+                        reward.position.y = reward.userData.originalY + Math.sin(time * 2 + index) * 0.1;
                         reward.rotation.y = time * 0.5;
                         
                         if (rewardGlows[index]) {
@@ -895,6 +1232,40 @@
             if (document.getElementById('autoRotate').checked) {
                 gridWorld.rotation.y += 0.002;
             }
+            
+            // Update collection animations
+            collectedRewardAnimations = collectedRewardAnimations.filter(anim => {
+                const elapsed = Date.now() - anim.startTime;
+                const progress = Math.min(elapsed / anim.duration, 1);
+                
+                if (progress < 1) {
+                    // Scale and fade reward
+                    const scale = anim.startScale + (anim.endScale - anim.startScale) * progress;
+                    anim.reward.scale.setScalar(scale);
+                    anim.reward.material.opacity = anim.startOpacity * (1 - progress);
+                    
+                    if (anim.glow) {
+                        anim.glow.scale.setScalar(scale * 1.5);
+                        anim.glow.material.opacity = 0.3 * (1 - progress);
+                    }
+                    
+                    // Update particles
+                    anim.particles.forEach(particle => {
+                        particle.position.add(particle.userData.velocity);
+                        particle.userData.velocity.y -= 0.005; // gravity
+                        particle.material.opacity = 0.8 * (1 - progress);
+                        particle.scale.setScalar(1 - progress * 0.5);
+                    });
+                    
+                    return true;
+                } else {
+                    // Animation complete - cleanup
+                    anim.reward.visible = false;
+                    if (anim.glow) anim.glow.visible = false;
+                    anim.particles.forEach(particle => scene.remove(particle));
+                    return false;
+                }
+            });
             
             // Render
             renderer.render(scene, camera);
@@ -986,6 +1357,303 @@
         window.toggleAutoRotate = function() {
             if (!document.getElementById('autoRotate').checked && gridWorld) {
                 gridWorld.rotation.y = 0;
+            }
+        };
+        
+        window.refreshExperiments = refreshExperiments;
+        
+        // Analytics functions
+        function initializeAnalytics() {
+            initializeRewardsChart();
+            initializeTimingChart();
+            initializeNetworkChart();
+        }
+        
+        function initializeRewardsChart() {
+            const ctx = document.getElementById('rewardsCanvas').getContext('2d');
+            rewardsChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Cumulative Rewards',
+                        data: [],
+                        borderColor: '#4CAF50',
+                        backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                        tension: 0.1
+                    }, {
+                        label: 'Gradient Signal',
+                        data: [],
+                        borderColor: '#2196F3',
+                        backgroundColor: 'rgba(33, 150, 243, 0.1)',
+                        tension: 0.1,
+                        yAxisID: 'y1'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    plugins: {
+                        legend: {
+                            labels: { color: 'white' }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: { display: true, text: 'Step', color: 'white' },
+                            ticks: { color: 'white' },
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                        },
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: { display: true, text: 'Rewards', color: 'white' },
+                            ticks: { color: 'white' },
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: { display: true, text: 'Gradient', color: 'white' },
+                            ticks: { color: 'white' },
+                            grid: { drawOnChartArea: false }
+                        }
+                    }
+                }
+            });
+        }
+        
+        function initializeTimingChart() {
+            const ctx = document.getElementById('timingCanvas').getContext('2d');
+            timingChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Time Between Rewards (steps)',
+                        data: [],
+                        backgroundColor: '#FF9800',
+                        borderColor: '#F57C00',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            labels: { color: 'white' }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: { display: true, text: 'Reward #', color: 'white' },
+                            ticks: { color: 'white' },
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                        },
+                        y: {
+                            title: { display: true, text: 'Steps', color: 'white' },
+                            ticks: { color: 'white' },
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                        }
+                    }
+                }
+            });
+        }
+        
+        function initializeNetworkChart() {
+            const ctx = document.getElementById('networkCanvas').getContext('2d');
+            networkChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Average Firing Rate (Hz)',
+                        data: [],
+                        borderColor: '#E91E63',
+                        backgroundColor: 'rgba(233, 30, 99, 0.1)',
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            labels: { color: 'white' }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const step = context.parsed.x;
+                                    const data = trajectoryData?.trajectory[step];
+                                    if (data?.neuralActivity) {
+                                        const firingRate = data.neuralActivity.firingRateHz || 
+                                            ((data.neuralActivity.spikeCount / 256) * 1000.0);
+                                        return [
+                                            `Firing Rate: ${firingRate.toFixed(1)} Hz`,
+                                            `Spike Count: ${data.neuralActivity.spikeCount}`,
+                                            `Mean Potential: ${data.neuralActivity.meanPotential.toFixed(1)} mV`,
+                                            `Max Potential: ${data.neuralActivity.maxPotential.toFixed(1)} mV`
+                                        ];
+                                    }
+                                    return `Firing Rate: ${(context.parsed.y * 10).toFixed(1)} Hz`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: { display: true, text: 'Step', color: 'white' },
+                            ticks: { color: 'white' },
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                        },
+                        y: {
+                            title: { display: true, text: 'Firing Rate (Hz)', color: 'white' },
+                            ticks: { color: 'white' },
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                        }
+                    }
+                }
+            });
+        }
+        
+        function processAnalyticsData() {
+            if (!trajectoryData) return;
+            
+            analyticsData = {
+                steps: [],
+                cumulativeRewards: [],
+                rewardTimestamps: [],
+                timeBetweenRewards: [],
+                gradientValues: [],
+                neuralActivity: []
+            };
+            
+            let lastRewardStep = 0;
+            let prevRewardsCollected = 0;
+            
+            trajectoryData.trajectory.forEach((step, index) => {
+                analyticsData.steps.push(index);
+                analyticsData.cumulativeRewards.push(step.cumulativeReward || 0);
+                analyticsData.gradientValues.push(step.observation || 0);
+                
+                // Check for new rewards
+                const currentRewardsCollected = step.rewardCollected ? 
+                    step.rewardCollected.filter(r => r).length : 0;
+                
+                if (currentRewardsCollected > prevRewardsCollected) {
+                    analyticsData.rewardTimestamps.push(index);
+                    if (analyticsData.rewardTimestamps.length > 1) {
+                        analyticsData.timeBetweenRewards.push(index - lastRewardStep);
+                    }
+                    lastRewardStep = index;
+                    prevRewardsCollected = currentRewardsCollected;
+                }
+                
+                // Extract neural activity data if available
+                if (step.neuralActivity) {
+                    // Use actual firing rate in Hz if available, otherwise calculate from spike count
+                    let firingRate = 0;
+                    if (step.neuralActivity.firingRateHz !== undefined) {
+                        // Use pre-calculated firing rate, normalize to typical 0-10Hz range
+                        firingRate = step.neuralActivity.firingRateHz / 10.0;
+                    } else if (step.neuralActivity.spikeCount !== undefined) {
+                        // Fallback: estimate from spike count (assuming 256 neurons, 1ms timestep)
+                        firingRate = (step.neuralActivity.spikeCount / 256) * 1000.0 / 10.0;
+                    }
+                    analyticsData.neuralActivity.push(firingRate);
+                } else {
+                    // Fallback for episodes without neural data
+                    analyticsData.neuralActivity.push(0);
+                }
+            });
+        }
+        
+        function updateAnalyticsCharts() {
+            if (!analyticsData.steps.length) return;
+            
+            // Update data up to current step
+            const currentData = {
+                steps: analyticsData.steps.slice(0, currentStep + 1),
+                cumulativeRewards: analyticsData.cumulativeRewards.slice(0, currentStep + 1),
+                gradientValues: analyticsData.gradientValues.slice(0, currentStep + 1),
+                neuralActivity: analyticsData.neuralActivity.slice(0, currentStep + 1)
+            };
+            
+            // Update rewards chart
+            if (rewardsChart) {
+                rewardsChart.data.labels = currentData.steps;
+                rewardsChart.data.datasets[0].data = currentData.cumulativeRewards;
+                rewardsChart.data.datasets[1].data = currentData.gradientValues;
+                rewardsChart.update('none');
+            }
+            
+            // Update timing chart
+            if (timingChart && analyticsData.timeBetweenRewards.length > 0) {
+                const rewardsUpToCurrent = analyticsData.rewardTimestamps.filter(t => t <= currentStep);
+                const timingData = analyticsData.timeBetweenRewards.slice(0, rewardsUpToCurrent.length - 1);
+                
+                timingChart.data.labels = timingData.map((_, i) => `Reward ${i + 2}`);
+                timingChart.data.datasets[0].data = timingData;
+                timingChart.update('none');
+            }
+            
+            // Update network chart
+            if (networkChart) {
+                networkChart.data.labels = currentData.steps;
+                // Scale back to Hz for display (data is normalized to 0-1 range)
+                const scaledData = currentData.neuralActivity.map(rate => rate * 10);
+                networkChart.data.datasets[0].data = scaledData;
+                networkChart.update('none');
+            }
+        }
+        
+        window.toggleAnalytics = function() {
+            const analyticsPanel = document.getElementById('analytics');
+            const toggleBtn = document.getElementById('toggleAnalytics');
+            
+            if (analyticsPanel.style.display === 'none' || !analyticsPanel.style.display) {
+                analyticsPanel.style.display = 'block';
+                toggleBtn.style.bottom = '270px';
+                if (!rewardsChart) {
+                    initializeAnalytics();
+                }
+                updateAnalyticsCharts();
+            } else {
+                analyticsPanel.style.display = 'none';
+                toggleBtn.style.bottom = '10px';
+            }
+        };
+        
+        window.switchAnalyticsTab = function(tab) {
+            // Update tab buttons
+            document.querySelectorAll('.analytics-tab').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            
+            // Update chart containers
+            document.querySelectorAll('.chart-container').forEach(container => {
+                container.classList.remove('active');
+            });
+            
+            switch(tab) {
+                case 'rewards':
+                    document.getElementById('rewardsChart').classList.add('active');
+                    break;
+                case 'timing':
+                    document.getElementById('timingChart').classList.add('active');
+                    break;
+                case 'network':
+                    document.getElementById('networkChart').classList.add('active');
+                    break;
             }
         };
         
