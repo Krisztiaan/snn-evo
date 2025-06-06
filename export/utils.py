@@ -172,3 +172,168 @@ def load_experiment_summary(experiment_dir: Union[str, Path]) -> dict:
         'metadata': metadata,
         'episode_summaries': summaries
     }
+
+
+# === Data Alignment Utilities ===
+
+def align_timesteps(sparse_data: dict, reference_timesteps: np.ndarray, 
+                   default_value: Any = None) -> np.ndarray:
+    """Align sparse data to reference timesteps.
+    
+    Args:
+        sparse_data: Dict with 'timesteps' and 'values' arrays
+        reference_timesteps: Target timesteps to align to
+        default_value: Value to use for missing timesteps
+        
+    Returns:
+        Array of values aligned to reference timesteps
+    """
+    if not sparse_data or 'timesteps' not in sparse_data:
+        return np.full(len(reference_timesteps), default_value)
+        
+    # Create output array
+    aligned = np.full(len(reference_timesteps), default_value)
+    
+    # Map sparse timesteps to indices
+    sparse_ts = sparse_data['timesteps']
+    sparse_vals = sparse_data.get('values', sparse_data.get('rewards', []))
+    
+    # Use searchsorted for efficient matching
+    indices = np.searchsorted(reference_timesteps, sparse_ts)
+    
+    # Only keep valid indices
+    valid_mask = (indices < len(reference_timesteps)) & (reference_timesteps[indices] == sparse_ts)
+    valid_indices = indices[valid_mask]
+    valid_values = sparse_vals[valid_mask]
+    
+    # Fill in the values
+    aligned[valid_indices] = valid_values
+    
+    return aligned
+
+
+def interpolate_sampled_data(sampled_data: dict, reference_timesteps: np.ndarray,
+                            method: str = 'nearest') -> dict:
+    """Interpolate sampled data to match reference timesteps.
+    
+    Args:
+        sampled_data: Dict with 'timesteps' and data arrays
+        reference_timesteps: Target timesteps to interpolate to
+        method: Interpolation method ('nearest', 'linear', 'zero')
+        
+    Returns:
+        Dict with interpolated data arrays
+    """
+    if not sampled_data or 'timesteps' not in sampled_data:
+        return {}
+        
+    sampled_ts = np.array(sampled_data['timesteps'])
+    interpolated = {}
+    
+    # Skip timesteps key
+    data_keys = [k for k in sampled_data.keys() if k != 'timesteps']
+    
+    for key in data_keys:
+        data = np.array(sampled_data[key])
+        
+        if len(data.shape) == 1:
+            # 1D data - simple interpolation
+            if method == 'nearest':
+                # Find nearest sampled timestep for each reference timestep
+                indices = np.searchsorted(sampled_ts, reference_timesteps)
+                indices = np.clip(indices, 0, len(sampled_ts) - 1)
+                
+                # Check if previous index is closer
+                for i in range(len(indices)):
+                    if indices[i] > 0:
+                        curr_dist = abs(sampled_ts[indices[i]] - reference_timesteps[i])
+                        prev_dist = abs(sampled_ts[indices[i]-1] - reference_timesteps[i])
+                        if prev_dist < curr_dist:
+                            indices[i] -= 1
+                            
+                interpolated[key] = data[indices]
+                
+            elif method == 'linear':
+                # Linear interpolation
+                interpolated[key] = np.interp(reference_timesteps, sampled_ts, data)
+                
+            elif method == 'zero':
+                # Zero-order hold (forward fill)
+                indices = np.searchsorted(sampled_ts, reference_timesteps, side='right') - 1
+                indices = np.clip(indices, 0, len(sampled_ts) - 1)
+                interpolated[key] = data[indices]
+                
+        else:
+            # Multi-dimensional data - interpolate each dimension
+            result = np.zeros((len(reference_timesteps),) + data.shape[1:])
+            
+            if method == 'nearest':
+                indices = np.searchsorted(sampled_ts, reference_timesteps)
+                indices = np.clip(indices, 0, len(sampled_ts) - 1)
+                
+                for i in range(len(indices)):
+                    if indices[i] > 0:
+                        curr_dist = abs(sampled_ts[indices[i]] - reference_timesteps[i])
+                        prev_dist = abs(sampled_ts[indices[i]-1] - reference_timesteps[i])
+                        if prev_dist < curr_dist:
+                            indices[i] -= 1
+                            
+                result = data[indices]
+                
+            elif method == 'linear':
+                # Interpolate each feature separately
+                for j in range(data.shape[1]):
+                    result[:, j] = np.interp(reference_timesteps, sampled_ts, data[:, j])
+                    
+            elif method == 'zero':
+                indices = np.searchsorted(sampled_ts, reference_timesteps, side='right') - 1
+                indices = np.clip(indices, 0, len(sampled_ts) - 1)
+                result = data[indices]
+                
+            interpolated[key] = result
+    
+    interpolated['timesteps'] = reference_timesteps
+    return interpolated
+
+
+def create_timestep_mapping(behavior_timesteps: np.ndarray, 
+                          neural_timesteps: np.ndarray,
+                          spike_timesteps: np.ndarray = None) -> dict:
+    """Create mapping between different data stream timesteps.
+    
+    Returns dict with mappings for efficient lookup.
+    """
+    mapping = {
+        'behavior_to_neural': {},
+        'neural_to_behavior': {},
+        'spike_bins': {}
+    }
+    
+    # Map behavior timesteps to nearest neural timesteps
+    for i, b_ts in enumerate(behavior_timesteps):
+        # Find nearest neural timestep
+        idx = np.searchsorted(neural_timesteps, b_ts)
+        if idx > 0 and (idx == len(neural_timesteps) or 
+                        abs(neural_timesteps[idx-1] - b_ts) < abs(neural_timesteps[idx] - b_ts)):
+            idx -= 1
+        idx = min(idx, len(neural_timesteps) - 1)
+        mapping['behavior_to_neural'][i] = idx
+        
+    # Reverse mapping
+    for b_idx, n_idx in mapping['behavior_to_neural'].items():
+        if n_idx not in mapping['neural_to_behavior']:
+            mapping['neural_to_behavior'][n_idx] = []
+        mapping['neural_to_behavior'][n_idx].append(b_idx)
+        
+    # Create spike bins if spike data provided
+    if spike_timesteps is not None:
+        # Bin spikes by behavior timestep
+        spike_bins = defaultdict(list)
+        for spike_ts in spike_timesteps:
+            # Find behavior timestep bin
+            idx = np.searchsorted(behavior_timesteps, spike_ts)
+            if idx > 0:
+                spike_bins[behavior_timesteps[idx-1]].append(spike_ts)
+        mapping['spike_bins'] = dict(spike_bins)
+        
+    return mapping

@@ -1,13 +1,14 @@
-# models/phase_0_8/config.py
-# keywords: [snn config, best-of-all-worlds, phase 0.8, principled design]
+# models/phase_0_10/config.py
+# keywords: [snn config, phase 0.10, multi-episode learning, adaptive learning rate]
 """
-Phase 0.8 Configuration: Principled synthesis of best ideas from phases 0.4-0.7
+Phase 0.10 Configuration: Multi-Episode Learning with Weight Persistence
 
-Design principles:
-1. Start simple, validate, then add complexity
-2. Clear biological motivation for each parameter
-3. Avoid premature optimization
-4. Learn from all previous phases' mistakes
+Key additions over phase 0.9:
+1. Adaptive learning rate schedule across episodes
+2. Weight momentum for smoother learning trajectories
+3. Soft state resets between episodes
+4. Optional weight consolidation
+5. All phase 0.9 improvements retained
 """
 
 from typing import NamedTuple
@@ -106,6 +107,9 @@ class NetworkParams(NamedTuple):
     REWARD_PREDICTION_RATE: float = 0.1  # TD learning rate
     REWARD_DISCOUNT: float = 0.95          # Future reward discount
     
+    # Gradient-based reward
+    GRADIENT_REWARD_SCALE: float = 0.3  # Scale factor for gradient-proportional dopamine
+    
     # === INPUT/OUTPUT ===
     # Population coding parameters
     NUM_INPUT_CHANNELS: int = 16   # Gradient encoding channels
@@ -122,12 +126,26 @@ class NetworkParams(NamedTuple):
     LEARN_PROCESSING_READOUT: bool = True     # Output learning
     LEARN_INPUT_CONNECTIONS: bool = True 
     
+    # === MULTI-EPISODE LEARNING ===
+    # Adaptive learning rate
+    LEARNING_RATE_DECAY: float = 0.95     # Learning rate decay per episode
+    MIN_LEARNING_RATE: float = 0.01       # Minimum learning rate floor
+    
+    # Weight momentum
+    WEIGHT_MOMENTUM_DECAY: float = 0.9    # Momentum coefficient (0-1)
+    
+    # Weight consolidation
+    WEIGHT_CONSOLIDATION: bool = True     # Enable weight consolidation
+    CONSOLIDATION_INTERVAL: int = 5       # Consolidate every N episodes
+    WEIGHT_CONSOLIDATION_TARGET: float = 0.5  # Target mean weight magnitude
+    WEIGHT_CONSOLIDATION_RATE: float = 0.1    # How fast to consolidate (0-1) 
+    
 
 class ExperimentConfig(NamedTuple):
     """Experiment configuration."""
-    n_episodes: int = 5
+    n_episodes: int = 10  # More episodes to observe multi-episode learning
     seed: int = 42
-    export_dir: str = "experiments/phase_0_8"
+    export_dir: str = "experiments/phase_0_10"
     enable_export: bool = True
     
     # Debugging/monitoring flags

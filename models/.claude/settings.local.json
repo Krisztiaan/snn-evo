@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(h5dump:*)",
+      "Bash(cp:*)",
+      "Bash(awk:*)"
+    ],
+    "deny": []
+  }
+}

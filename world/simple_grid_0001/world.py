@@ -19,12 +19,26 @@ class SimpleGridWorld:
     - JAX-optimized for performance
     """
     
-    def __init__(self, config: WorldConfig = None, grid_size: int = 100):
+    # World metadata
+    NAME = "SimpleGridWorld"
+    VERSION = "0.0.2"
+    DESCRIPTION = "A toroidal grid navigation environment with dynamic reward respawning"
+    
+    def __init__(self, config: WorldConfig = None, grid_size: int = None):
         if config is None:
-            config = WorldConfig(grid_size=grid_size)
-        else:
+            config = WorldConfig(grid_size=grid_size if grid_size is not None else 100)
+        elif grid_size is not None:
             config = config._replace(grid_size=grid_size)
         self.config = config
+    
+    def get_metadata(self) -> dict:
+        """Get world metadata."""
+        return {
+            "name": self.NAME,
+            "version": self.VERSION,
+            "description": self.DESCRIPTION,
+            "config": self.config._asdict()
+        }
         
     def reset(self, key: random.PRNGKey) -> Tuple[WorldState, Observation]:
         """Reset the world to initial state."""
@@ -53,15 +67,19 @@ class SimpleGridWorld:
         # Update position based on action (0=up, 1=right, 2=down, 3=left)
         new_pos = self._move_agent(state.agent_pos, action)
         
-        # Check reward collection
-        reward, new_collected = self._collect_rewards(
-            new_pos, state.reward_positions, state.reward_collected
+        # Generate key for potential reward respawning using timestep as seed
+        # This ensures deterministic behavior based on world state
+        respawn_key = random.PRNGKey(state.timestep)
+        
+        # Check reward collection and respawn
+        reward, new_collected, new_reward_positions = self._collect_rewards(
+            new_pos, state.reward_positions, state.reward_collected, respawn_key
         )
         
         # Update state
         new_state = WorldState(
             agent_pos=new_pos,
-            reward_positions=state.reward_positions,
+            reward_positions=new_reward_positions,
             reward_collected=new_collected,
             total_reward=state.total_reward + reward,
             timestep=state.timestep + 1
@@ -70,8 +88,8 @@ class SimpleGridWorld:
         # Get observation
         observation = self._get_observation(new_state)
         
-        # Check if done
-        done = (new_state.timestep >= self.config.max_timesteps) | jnp.all(new_collected)
+        # Check if done (never done now since rewards respawn)
+        done = new_state.timestep >= self.config.max_timesteps
         
         return StepResult(
             state=new_state,
@@ -192,9 +210,10 @@ class SimpleGridWorld:
         self, 
         agent_pos: Tuple[int, int],
         reward_positions: Array,
-        reward_collected: Array
-    ) -> Tuple[float, Array]:
-        """Check if agent collected any rewards."""
+        reward_collected: Array,
+        key: random.PRNGKey
+    ) -> Tuple[float, Array, Array]:
+        """Check if agent collected any rewards and respawn them at farthest position."""
         # Calculate distances to all rewards
         agent_array = jnp.array(agent_pos)
         distances = self._calculate_distances(agent_array, reward_positions)
@@ -214,7 +233,30 @@ class SimpleGridWorld:
         # Update collected status
         new_collected = reward_collected | at_reward
         
-        return total_reward, new_collected
+        # If any rewards were collected, respawn them at farthest position
+        # Use JAX-compatible conditional logic
+        def respawn_rewards(positions, collected):
+            # Find farthest position for first collected reward
+            farthest_pos = self._find_farthest_position(agent_pos, positions, collected)
+            
+            # Update first collected reward position
+            first_collected_idx = jnp.argmax(at_reward)
+            new_positions = positions.at[first_collected_idx].set(farthest_pos)
+            new_collected_status = collected.at[first_collected_idx].set(False)
+            
+            return new_positions, new_collected_status
+        
+        # Respawn if rewards were collected
+        any_collected = jnp.any(at_reward)
+        
+        new_reward_positions, new_collected = jax.lax.cond(
+            any_collected,
+            respawn_rewards,
+            lambda p, c: (p, c),
+            reward_positions, new_collected
+        )
+        
+        return total_reward, new_collected, new_reward_positions
     
     def _get_observation(self, state: WorldState) -> Observation:
         """Generate observation for the agent."""
@@ -261,3 +303,60 @@ class SimpleGridWorld:
             distances = jnp.linalg.norm(positions - pos, axis=1)
         
         return distances
+    
+    def _find_farthest_position(self, agent_pos: Tuple[int, int], reward_positions: Array, reward_collected: Array) -> Array:
+        """Find the grid position farthest from the agent."""
+        agent_array = jnp.array(agent_pos)
+        
+        # Create a grid of candidate positions
+        # Sample evenly across the grid for efficiency
+        step_size = max(1, self.config.grid_size // 20)
+        x_coords = jnp.arange(0, self.config.grid_size, step_size)
+        y_coords = jnp.arange(0, self.config.grid_size, step_size)
+        
+        # Create meshgrid
+        xx, yy = jnp.meshgrid(x_coords, y_coords)
+        candidate_positions = jnp.stack([xx.ravel(), yy.ravel()], axis=1)
+        
+        # Calculate distances from agent
+        distances_from_agent = self._calculate_distances(agent_array, candidate_positions)
+        
+        # Calculate minimum distance to each uncollected reward using JAX-compatible operations
+        # Expand dimensions for broadcasting
+        candidate_positions_expanded = candidate_positions[:, None, :]  # Shape: (n_candidates, 1, 2)
+        reward_positions_expanded = reward_positions[None, :, :]  # Shape: (1, n_rewards, 2)
+        
+        # Calculate all pairwise distances
+        if self.config.toroidal:
+            diff = candidate_positions_expanded - reward_positions_expanded
+            wrapped_diff = jnp.minimum(
+                jnp.abs(diff),
+                self.config.grid_size - jnp.abs(diff)
+            )
+            pairwise_distances = jnp.linalg.norm(wrapped_diff, axis=2)
+        else:
+            pairwise_distances = jnp.linalg.norm(
+                candidate_positions_expanded - reward_positions_expanded, axis=2
+            )
+        
+        # Mask collected rewards by setting their distances to infinity
+        masked_distances = jnp.where(
+            reward_collected[None, :],
+            jnp.inf,
+            pairwise_distances
+        )
+        
+        # Get minimum distance to any uncollected reward for each candidate
+        min_distances_to_rewards = jnp.min(masked_distances, axis=1)
+        
+        # Find position that maximizes distance from agent while maintaining some distance from other rewards
+        # Weight agent distance more heavily
+        scores = distances_from_agent + 0.2 * jnp.where(
+            jnp.isfinite(min_distances_to_rewards),
+            min_distances_to_rewards,
+            0.0
+        )
+        
+        # Get the position with highest score
+        best_idx = jnp.argmax(scores)
+        return candidate_positions[best_idx]

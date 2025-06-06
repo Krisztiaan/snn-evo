@@ -54,6 +54,16 @@ class ExperimentLoader:
             else:
                 # System metadata
                 metadata[key] = value
+        
+        # Ensure simulation parameters are included with defaults for older files
+        if 'simulation_dt' not in metadata:
+            metadata['simulation_dt'] = 1.0  # Default 1ms
+        if 'neural_sampling_rate' not in metadata:
+            metadata['neural_sampling_rate'] = 100  # Default sampling
+        if 'behavior_sampling_rate' not in metadata:
+            metadata['behavior_sampling_rate'] = 1  # Every timestep
+        if 'data_format_version' not in metadata:
+            metadata['data_format_version'] = '1.0'  # Original version
                 
         return metadata
         

@@ -106,6 +106,9 @@ class NetworkParams(NamedTuple):
     REWARD_PREDICTION_RATE: float = 0.1  # TD learning rate
     REWARD_DISCOUNT: float = 0.95          # Future reward discount
     
+    # Gradient-based reward
+    GRADIENT_REWARD_SCALE: float = 0.3  # Scale factor for gradient-proportional dopamine
+    
     # === INPUT/OUTPUT ===
     # Population coding parameters
     NUM_INPUT_CHANNELS: int = 16   # Gradient encoding channels
@@ -125,9 +128,9 @@ class NetworkParams(NamedTuple):
 
 class ExperimentConfig(NamedTuple):
     """Experiment configuration."""
-    n_episodes: int = 5
+    n_episodes: int = 3  # Changed from 5 to 3 for faster iteration
     seed: int = 42
-    export_dir: str = "experiments/phase_0_8"
+    export_dir: str = "experiments/phase_0_9"
     enable_export: bool = True
     
     # Debugging/monitoring flags

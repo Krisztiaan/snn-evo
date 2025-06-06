@@ -20,7 +20,8 @@ class Episode:
                  episode_id: int, 
                  h5_file: h5py.File,
                  neural_sampling_rate: int = 100,
-                 validate_data: bool = True):
+                 validate_data: bool = True,
+                 spike_buffer_size: int = 1000):
         """Initialize episode within an HDF5 file.
         
         Args:
@@ -28,11 +29,13 @@ class Episode:
             h5_file: Open HDF5 file handle
             neural_sampling_rate: Sample neural state every N timesteps
             validate_data: Whether to validate data before saving
+            spike_buffer_size: Number of timesteps to buffer spikes before flushing
         """
         self.episode_id = episode_id
         self.h5_file = h5_file
         self.neural_sampling_rate = neural_sampling_rate
         self.validate_data = validate_data
+        self.spike_buffer_size = spike_buffer_size
         
         # Create episode group
         self.group = h5_file.create_group(f'episode_{episode_id:04d}')
@@ -56,6 +59,10 @@ class Episode:
         self.last_neural_sample = -neural_sampling_rate
         self._initialized = {}
         
+        # Spike buffer for efficient logging
+        self._spike_buffer_times: List[int] = []
+        self._spike_buffer_neurons: List[int] = []
+        
     def log_timestep(self,
                      timestep: int,
                      neural_state: Optional[Dict[str, Any]] = None,
@@ -76,12 +83,18 @@ class Episode:
             self._append_dict_data(self.neural_group, timestep, neural_state)
             self.last_neural_sample = timestep
             
-        # Spikes (sparse)
+        # Spikes (buffered for efficiency)
         if spikes is not None:
             spike_data = ensure_numpy(spikes)
             if spike_data.any():
                 indices = np.where(spike_data)[0]
-                self._append_sparse_data(self.spike_group, 'spikes', timestep, indices)
+                # Add to buffer instead of writing immediately
+                self._spike_buffer_times.extend([timestep] * len(indices))
+                self._spike_buffer_neurons.extend(indices.tolist())
+                
+                # Flush if buffer is full
+                if len(self._spike_buffer_times) >= self.spike_buffer_size * 10:  # Assume ~10 spikes/timestep avg
+                    self._flush_spike_buffer()
                 
         # Behavior (all timesteps)
         if behavior is not None:
@@ -127,6 +140,17 @@ class Episode:
         
     def end(self, success: bool = False, final_state: Optional[Dict[str, Any]] = None):
         """End episode and save metadata."""
+        # Flush any remaining spike data
+        if self._spike_buffer_times:
+            self._flush_spike_buffer()
+            
+        # Trim allocated but unused space in all groups
+        self._trim_datasets(self.neural_group)
+        self._trim_datasets(self.spike_group)
+        self._trim_datasets(self.behavior_group)
+        self._trim_datasets(self.reward_group)
+        self._trim_datasets(self.weight_group)
+        
         # Update attributes
         self.group.attrs['end_time'] = datetime.now().isoformat()
         self.group.attrs['total_timesteps'] = self.timestep_count
@@ -147,66 +171,164 @@ class Episode:
             for key, value in final_state.items():
                 final_group.create_dataset(key, data=ensure_numpy(value))
                 
+    def _trim_datasets(self, group: h5py.Group):
+        """Trim allocated but unused space from datasets."""
+        if 'timesteps' not in group:
+            return
+            
+        actual_size = group['timesteps'].shape[0]
+        allocated_size = group.attrs.get('_allocated_size', actual_size)
+        
+        # Find actual data size (non-zero timesteps)
+        if actual_size > 0:
+            timesteps = group['timesteps'][:]
+            # Find last non-zero timestep
+            nonzero_mask = timesteps != 0
+            if np.any(nonzero_mask):
+                actual_size = np.where(nonzero_mask)[0][-1] + 1
+            else:
+                actual_size = 0
+        
+        # Trim if needed
+        if actual_size < allocated_size:
+            for key in group.keys():
+                if isinstance(group[key], h5py.Dataset):
+                    group[key].resize(actual_size, axis=0)
+            
+            # Update allocated size
+            group.attrs['_allocated_size'] = actual_size
+                
     def _append_dict_data(self, group: h5py.Group, timestep: int, data: Dict[str, Any]):
-        """Append dictionary data to HDF5 group."""
-        # Initialize timesteps dataset if needed
+        """Append dictionary data to HDF5 group with batch resizing."""
+        # Initialize timesteps dataset if needed with compression
         if 'timesteps' not in group:
             group.create_dataset(
                 'timesteps', 
                 shape=(0,), 
                 maxshape=(None,), 
                 dtype='i8',
-                chunks=(min(1000, 100)),  # Reasonable chunk size
-                # Note: compression could be added here for optimization
+                chunks=(1000,),
+                **self.exporter._compression_kwargs  # Apply compression
             )
+            group.attrs['_allocated_size'] = 0
             
+        # Get current size and check if resize needed
+        current_size = group['timesteps'].shape[0]
+        new_size = current_size + 1
+        allocated_size = group.attrs.get('_allocated_size', current_size)
+        
+        # Batch resize with geometric growth
+        if new_size > allocated_size:
+            new_allocated = max(int(allocated_size * 1.5), allocated_size + 100, new_size)
+            group['timesteps'].resize(new_allocated, axis=0)
+            group.attrs['_allocated_size'] = new_allocated
+            
+            # Resize all existing datasets
+            for key in group.keys():
+                if key != 'timesteps' and isinstance(group[key], h5py.Dataset):
+                    group[key].resize(new_allocated, axis=0)
+        
         # Append timestep
-        ts_data = group['timesteps']
-        idx = ts_data.shape[0]
-        ts_data.resize(idx + 1, axis=0)
-        ts_data[idx] = timestep
+        group['timesteps'][current_size] = timestep
         
         # Append each data field
         for key, value in data.items():
             value_np = ensure_numpy(value)
             
             if key not in group:
-                # Create dataset on first occurrence
+                # Create dataset on first occurrence with compression
                 if value_np.ndim == 0:
-                    shape, maxshape = (0,), (None,)
+                    shape = (allocated_size,)
+                    maxshape = (None,)
+                    chunks = (1000,)
                 else:
-                    shape, maxshape = (0,) + value_np.shape, (None,) + value_np.shape
+                    shape = (allocated_size,) + value_np.shape
+                    maxshape = (None,) + value_np.shape
+                    chunks = (min(1000, allocated_size),) + value_np.shape
                     
-                group.create_dataset(key, shape=shape, maxshape=maxshape, dtype=value_np.dtype)
+                group.create_dataset(key, shape=shape, maxshape=maxshape, 
+                                   dtype=value_np.dtype, chunks=chunks,
+                                   **self.exporter._compression_kwargs)
                 
             # Append value
-            dataset = group[key]
-            dataset.resize(idx + 1, axis=0)
-            dataset[idx] = value_np
+            group[key][current_size] = value_np
             
     def _append_sparse_data(self, group: h5py.Group, name: str, timestep: int, values: Union[List, np.ndarray]):
-        """Append sparse data (timestep, values pairs)."""
+        """Append sparse data (timestep, values pairs) with batch resizing."""
         values_np = ensure_numpy(values)
         n_values = len(values_np)
         
         if n_values == 0:
             return
             
-        # Initialize datasets if needed
+        # Initialize datasets if needed with compression
         if 'timesteps' not in group:
-            group.create_dataset('timesteps', shape=(0,), maxshape=(None,), dtype='i8')
-            group.create_dataset('values', shape=(0,), maxshape=(None,), dtype=values_np.dtype)
+            group.create_dataset('timesteps', shape=(0,), maxshape=(None,), 
+                               dtype='i8', chunks=(1000,), **self._compression_kwargs)
+            group.create_dataset('values', shape=(0,), maxshape=(None,), 
+                               dtype=values_np.dtype, chunks=(1000,), **self._compression_kwargs)
+            # Track allocated size for batch resizing
+            group.attrs['_allocated_size'] = 0
             
         # Get current size
-        start_idx = group['timesteps'].shape[0]
-        end_idx = start_idx + n_values
+        current_size = group['timesteps'].shape[0]
+        new_size = current_size + n_values
+        allocated_size = group.attrs.get('_allocated_size', current_size)
         
-        # Resize and append
-        group['timesteps'].resize(end_idx, axis=0)
-        group['values'].resize(end_idx, axis=0)
+        # Batch resize with geometric growth
+        if new_size > allocated_size:
+            # Grow by 50% or at least 1000 elements
+            new_allocated = max(int(allocated_size * 1.5), allocated_size + 1000, new_size)
+            group['timesteps'].resize(new_allocated, axis=0)
+            group['values'].resize(new_allocated, axis=0)
+            group.attrs['_allocated_size'] = new_allocated
         
-        group['timesteps'][start_idx:end_idx] = timestep
-        group['values'][start_idx:end_idx] = values_np
+        # Append data
+        group['timesteps'][current_size:new_size] = timestep
+        group['values'][current_size:new_size] = values_np
+        
+    def _flush_spike_buffer(self):
+        """Flush spike buffer to disk."""
+        if not self._spike_buffer_times:
+            return
+            
+        # Convert to numpy arrays
+        times = np.array(self._spike_buffer_times, dtype=np.int32)
+        neurons = np.array(self._spike_buffer_neurons, dtype=np.int32)
+        
+        # Create or extend datasets
+        if 'spike_times' not in self.spike_group:
+            # Create with chunking and compression
+            self.spike_group.create_dataset(
+                'spike_times', 
+                data=times,
+                maxshape=(None,),
+                chunks=(min(10000, len(times)),),
+                compression='gzip',
+                compression_opts=1  # Fast compression
+            )
+            self.spike_group.create_dataset(
+                'spike_neurons',
+                data=neurons,
+                maxshape=(None,),
+                chunks=(min(10000, len(neurons)),),
+                compression='gzip',
+                compression_opts=1
+            )
+        else:
+            # Extend existing datasets
+            old_len = self.spike_group['spike_times'].shape[0]
+            new_len = old_len + len(times)
+            
+            self.spike_group['spike_times'].resize((new_len,))
+            self.spike_group['spike_neurons'].resize((new_len,))
+            
+            self.spike_group['spike_times'][old_len:new_len] = times
+            self.spike_group['spike_neurons'][old_len:new_len] = neurons
+            
+        # Clear buffers
+        self._spike_buffer_times.clear()
+        self._spike_buffer_neurons.clear()
 
 
 class DataExporter:
@@ -218,7 +340,8 @@ class DataExporter:
                  neural_sampling_rate: int = 100,
                  validate_data: bool = True,
                  compression: str = 'gzip',
-                 compression_level: int = 4):
+                 compression_level: int = 4,
+                 simulation_dt: float = 1.0):
         """Initialize exporter.
         
         Args:
@@ -228,11 +351,13 @@ class DataExporter:
             validate_data: Whether to validate data
             compression: HDF5 compression ('gzip', 'lzf', None)
             compression_level: Compression level (1-9 for gzip)
+            simulation_dt: Simulation timestep in milliseconds (default 1.0)
         """
         self.experiment_name = experiment_name
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.neural_sampling_rate = neural_sampling_rate
         self.validate_data = validate_data
+        self.simulation_dt = simulation_dt
         
         # Create output directory
         self.output_dir = Path(output_base_dir) / f"{experiment_name}_{self.timestamp}"
@@ -261,6 +386,11 @@ class DataExporter:
         self.h5_file.attrs['schema_version'] = SCHEMA_VERSION
         self.h5_file.attrs['neural_sampling_rate'] = neural_sampling_rate
         self.h5_file.attrs['compression'] = compression or 'none'
+        
+        # Add simulation parameters metadata
+        self.h5_file.attrs['simulation_dt'] = self.simulation_dt
+        self.h5_file.attrs['behavior_sampling_rate'] = 1  # Every timestep
+        self.h5_file.attrs['data_format_version'] = '1.1'  # Version with proper timestep handling
         
         # Create groups
         self.episodes_group = self.h5_file.create_group('episodes')

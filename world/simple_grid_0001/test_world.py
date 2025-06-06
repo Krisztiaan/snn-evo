@@ -45,24 +45,26 @@ def test_basic_functionality():
     
     print("✓ Toroidal wrapping works correctly")
     
-    # Test reward collection
-    # Place agent at a reward position
-    reward_pos = tuple(state.reward_positions[0].tolist())
-    state_at_reward = state._replace(agent_pos=reward_pos)
-    result = world.step(state_at_reward, action=4)  # Stay in place (if supported) or any action
+    # Test reward collection with respawn
+    # Place agent one step away from a reward position
+    reward_pos = state.reward_positions[0]
+    state_near_reward = state._replace(agent_pos=(int(reward_pos[0]), int(reward_pos[1]) + 1))
     
-    # For now just move to the reward position
-    state_at_reward = state._replace(agent_pos=(int(reward_pos[0]), int(reward_pos[1])))
-    reward, new_collected = world._collect_rewards(
-        state_at_reward.agent_pos,
-        state_at_reward.reward_positions, 
-        state_at_reward.reward_collected
-    )
+    # Step into the reward
+    result = world.step(state_near_reward, action=0)  # Move up
     
-    assert reward >= config.reward_value, "Should collect reward when at position"
-    assert jnp.any(new_collected), "Should mark reward as collected"
+    assert result.reward >= config.reward_value, "Should collect reward when stepping into position"
+    assert result.state.total_reward > 0, "Total reward should increase"
     
-    print("✓ Reward collection works correctly")
+    # Check that reward was respawned at a different position
+    old_pos = state.reward_positions[0]
+    new_pos = result.state.reward_positions[0]
+    assert not jnp.array_equal(old_pos, new_pos), "Reward should respawn at different position"
+    
+    # All rewards should still be uncollected (because of respawn)
+    assert jnp.all(~result.state.reward_collected), "All rewards should be uncollected after respawn"
+    
+    print("✓ Reward collection and respawn works correctly")
     
     print("\nAll tests passed! ✨")
 

@@ -1,14 +1,12 @@
-# models/phase_0_8/agent.py
-# keywords: [snn agent, phase 0.8, best-of-all-worlds, principled implementation]
+# models/phase_0_9/agent.py
+# keywords: [snn agent, phase 0.9, gradient-based dopamine, faster learning]
 """
-Phase 0.8 SNN Agent: Principled synthesis of best ideas from phases 0.4-0.7
+Phase 0.9 SNN Agent: Gradient-proportional dopamine for faster learning
 
-Key improvements:
-1. Clear separation of neuron populations with unified dynamics
-2. Proper two-trace STDP (missing in 0.5/0.6)
-3. Fixed input weights with learning only on processing/readout
-4. Homeostatic firing rate control
-5. Biologically motivated connectivity
+Key improvements over 0.8:
+1. Dopamine reward proportional to gradient value
+2. Faster reinforcement of gradient-following behavior
+3. All other improvements from phase 0.8 retained
 """
 
 from typing import Dict, Any, NamedTuple, Tuple, Optional
@@ -362,17 +360,21 @@ def _compute_eligibility_trace(state: AgentState, params: NetworkParams) -> jnp.
 
 
 @partial(jit, static_argnames=['params'])
-def _three_factor_learning(state: AgentState, reward: float, params: NetworkParams) -> AgentState:
+def _three_factor_learning(state: AgentState, reward: float, gradient: float, params: NetworkParams) -> AgentState:
     """
-    Three-factor learning rule with RPE-based dopamine modulation.
+    Three-factor learning rule with gradient-proportional dopamine modulation.
     """
     # 1. Compute reward prediction error
     td_error = reward + params.REWARD_DISCOUNT * state.value_estimate - state.value_estimate
     new_value = state.value_estimate + params.REWARD_PREDICTION_RATE * td_error
     
-    # 2. Update dopamine based on RPE
+    # 2. Update dopamine based on RPE + gradient bonus
+    # Add gradient-proportional reward to encourage following gradients
+    gradient_reward = gradient * params.GRADIENT_REWARD_SCALE
+    total_reward_signal = td_error * 0.5 + gradient_reward
+    
     decay = jnp.exp(-1.0 / params.TAU_DOPAMINE)
-    dopamine_response = state.dopamine * decay + params.BASELINE_DOPAMINE * (1 - decay) + td_error * 0.5
+    dopamine_response = state.dopamine * decay + params.BASELINE_DOPAMINE * (1 - decay) + total_reward_signal
     new_dopamine = jnp.clip(dopamine_response, 0.0, 2.0)
     
     # 3. Compute dopamine modulation factor
@@ -463,7 +465,7 @@ def _decode_action(state: AgentState, params: NetworkParams, key: random.PRNGKey
 # === MAIN AGENT CLASS ===
 
 class SnnAgent:
-    """Phase 0.8 SNN Agent with principled design."""
+    """Phase 0.9 SNN Agent with gradient-proportional dopamine modulation."""
     
     def __init__(self, config: SnnAgentConfig):
         self.config = config
@@ -600,7 +602,7 @@ class SnnAgent:
             world_state, obs, reward, done = result.state, result.observation, result.reward, result.done
             
             # 5. Learning step
-            self.state = _three_factor_learning(self.state, reward, self.params)
+            self.state = _three_factor_learning(self.state, reward, obs.gradient, self.params)
             
             # 6. Track rewards
             if reward > 0:
@@ -697,7 +699,7 @@ class SnnAgent:
         
         print("Initializing data exporter...")
         with DataExporter(
-            experiment_name="snn_agent_phase08",
+            experiment_name="snn_agent_phase09",
             output_base_dir=self.config.exp_config.export_dir,
             compression='gzip', 
             compression_level=1

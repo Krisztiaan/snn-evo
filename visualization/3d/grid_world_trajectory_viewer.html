@@ -269,6 +269,9 @@
         <div><span class="label">Cumulative Reward:</span> <span id="cumulativeReward">0</span></div>
         <div><span class="label">Coverage:</span> <span id="coverage">-</span></div>
         <div><span class="label">Seed:</span> <span id="seed">-</span></div>
+        <div id="neuralDataInfo" style="display: none;">
+            <span class="label">Neural Sampling:</span> <span id="neuralSamplingInfo">-</span>
+        </div>
         <br>
         <div class="label">Gradient Signal:</div>
         <div class="gradient-bar">
@@ -349,7 +352,7 @@
         
         <br>
         <label class="label">
-            <input type="checkbox" id="autoRotate" onchange="toggleAutoRotate()"> Auto Rotate
+            <input type="checkbox" id="followCamera" onchange="toggleFollowCamera()"> Follow Camera
         </label>
     </div>
 
@@ -385,6 +388,9 @@
         let agentPreviousPosition = new THREE.Vector3();
         let agentTargetRotation = 0;
         let collectedRewardAnimations = [];
+        let followCamera = false;
+        let cameraTargetPosition = new THREE.Vector3();
+        let cameraOffset = new THREE.Vector3(0, 15, 20); // Side view offset
         
         // Analytics variables
         let rewardsChart = null;
@@ -424,12 +430,12 @@
             
             // Scene
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0xF0F0F0);  // Soft white
+            scene.background = new THREE.Color(0x000000);  // Black background
             
             // Camera
             const aspect = window.innerWidth / window.innerHeight;
             camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 500);
-            camera.position.set(15, 12, 15);
+            camera.position.set(5, 15, 25); // Side view
             camera.lookAt(5, 0, 5);
             
             // Renderer
@@ -646,29 +652,24 @@
         };
         
         function setupLights() {
-            // Soft ambient light for even illumination
+            // Strong white ambient light
             const ambientLight = new THREE.AmbientLight(0xFFFFFF, 0.8);
             scene.add(ambientLight);
             
-            // Subtle directional light from above
-            const directionalLight = new THREE.DirectionalLight(0xFFFFFF, 0.4);
-            directionalLight.position.set(5, 20, 5);
-            directionalLight.castShadow = true;
-            directionalLight.shadow.camera.left = -15;
-            directionalLight.shadow.camera.right = 15;
-            directionalLight.shadow.camera.top = 15;
-            directionalLight.shadow.camera.bottom = -15;
-            directionalLight.shadow.camera.near = 0.1;
-            directionalLight.shadow.camera.far = 50;
-            directionalLight.shadow.mapSize.width = 2048;
-            directionalLight.shadow.mapSize.height = 2048;
-            directionalLight.shadow.bias = -0.001;
+            // Very strong overhead directional light
+            const directionalLight = new THREE.DirectionalLight(0xFFFFFF, 2.0);
+            directionalLight.position.set(0, 30, 0);
+            directionalLight.target.position.set(CONFIG.gridSize / 2, 0, CONFIG.gridSize / 2);
             scene.add(directionalLight);
+            scene.add(directionalLight.target);
             
-            // Very subtle point light for agent glow
-            const agentLight = new THREE.PointLight(CONFIG.agentCoreColor, 0.3, 3);
-            agentLight.position.set(5, 1, 5);
-            scene.add(agentLight);
+            // Additional fill light from above
+            const fillLight = new THREE.DirectionalLight(0xFFFFFF, 1.0);
+            fillLight.position.set(CONFIG.gridSize / 2, 25, CONFIG.gridSize / 2);
+            scene.add(fillLight);
+            
+            // Remove shadows for cleaner look
+            renderer.shadowMap.enabled = false;
         }
         
         function createGridWorld(gridSize) {
@@ -707,11 +708,11 @@
             // Update camera for grid size
             controls.target.set(CONFIG.gridSize / 2, 0, CONFIG.gridSize / 2);
             
-            // Adjust camera distance based on grid size
-            const cameraDistance = CONFIG.gridSize > 20 ? CONFIG.gridSize * 1.2 : CONFIG.gridSize * 1.5;
+            // Adjust camera distance based on grid size (side view)
+            const cameraDistance = CONFIG.gridSize > 20 ? CONFIG.gridSize * 1.5 : CONFIG.gridSize * 2.0;
             const cameraHeight = CONFIG.gridSize > 20 ? CONFIG.gridSize * 0.8 : CONFIG.gridSize * 1.2;
             
-            camera.position.set(cameraDistance, cameraHeight, cameraDistance);
+            camera.position.set(CONFIG.gridSize / 2, cameraHeight, cameraDistance);
             camera.far = CONFIG.gridSize * 3;
             camera.updateProjectionMatrix();
             
@@ -881,6 +882,26 @@
             rightEye.position.set(CONFIG.agentSize * 0.2, CONFIG.agentSize * 0.15, CONFIG.agentSize * 0.51);
             agent.add(rightEye);
             
+            // Add bright orange aura
+            const auraGeometry = new THREE.SphereGeometry(CONFIG.agentSize * 1.5, 16, 16);
+            const auraMaterial = new THREE.MeshBasicMaterial({
+                color: CONFIG.agentCoreColor,
+                transparent: true,
+                opacity: 0.4
+            });
+            const aura = new THREE.Mesh(auraGeometry, auraMaterial);
+            agent.add(aura);
+            
+            // Add outer aura for extra glow
+            const outerAuraGeometry = new THREE.SphereGeometry(CONFIG.agentSize * 2.0, 8, 8);
+            const outerAuraMaterial = new THREE.MeshBasicMaterial({
+                color: CONFIG.agentCoreColor,
+                transparent: true,
+                opacity: 0.2
+            });
+            const outerAura = new THREE.Mesh(outerAuraGeometry, outerAuraMaterial);
+            agent.add(outerAura);
+            
             agent.position.set(...position);
             scene.add(agent);
         }
@@ -976,19 +997,28 @@
                 rewards.push(reward);
                 scene.add(reward);
                 
-                // Add glow effect
-                if (CONFIG.gridSize <= 20) {
-                    const glowGeometry = new THREE.SphereGeometry(CONFIG.rewardSize * 0.8, 8, 8);
-                    const glowMaterial = new THREE.MeshBasicMaterial({
-                        color: CONFIG.rewardGlowColor,
-                        transparent: true,
-                        opacity: 0.3
-                    });
-                    const glow = new THREE.Mesh(glowGeometry, glowMaterial);
-                    glow.position.copy(reward.position);
-                    rewardGlows.push(glow);
-                    scene.add(glow);
-                }
+                // Add bright blue glow effect
+                const glowGeometry = new THREE.SphereGeometry(CONFIG.rewardSize * 2.0, 16, 16);
+                const glowMaterial = new THREE.MeshBasicMaterial({
+                    color: 0x00D4FF,  // Bright blue
+                    transparent: true,
+                    opacity: 0.6
+                });
+                const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+                glow.position.copy(reward.position);
+                rewardGlows.push(glow);
+                scene.add(glow);
+                
+                // Add outer glow for extra visibility
+                const outerGlowGeometry = new THREE.SphereGeometry(CONFIG.rewardSize * 3.0, 8, 8);
+                const outerGlowMaterial = new THREE.MeshBasicMaterial({
+                    color: 0x00A8E8,
+                    transparent: true,
+                    opacity: 0.2
+                });
+                const outerGlow = new THREE.Mesh(outerGlowGeometry, outerGlowMaterial);
+                outerGlow.position.copy(reward.position);
+                scene.add(outerGlow);
             });
         }
         
@@ -1006,6 +1036,7 @@
             });
             
             trail = new THREE.LineSegments(geometry, material);
+            trail.frustumCulled = false; // Prevent trail from disappearing
             scene.add(trail);
         }
         
@@ -1063,6 +1094,19 @@
             document.getElementById('totalSteps').textContent = meta.totalSteps;
             document.getElementById('coverage').textContent = meta.coverage ? `${(meta.coverage * 100).toFixed(1)}%` : 'N/A';
             document.getElementById('seed').textContent = meta.seed || 'N/A';
+            
+            // Show data sampling info if neural data is sampled
+            if (meta.hasNeuralData) {
+                const neuralInfoDiv = document.getElementById('neuralDataInfo');
+                const neuralInfoSpan = document.getElementById('neuralSamplingInfo');
+                neuralInfoDiv.style.display = 'block';
+                
+                if (meta.neuralSamplingRate > 1) {
+                    neuralInfoSpan.textContent = `Every ${meta.neuralSamplingRate} steps (${meta.neuralSamplingRate * meta.simulationDt}ms)`;
+                } else {
+                    neuralInfoSpan.textContent = 'Every timestep';
+                }
+            }
             
             // Create world
             createGridWorld(meta.gridSize);
@@ -1193,44 +1237,25 @@
                     agentLight.position.y += 1;
                 }
                 
-                // Add subtle bounce to agent
-                const bounce = Math.sin(Date.now() * 0.003) * 0.02;
-                agent.position.y = agentTargetPosition.y + bounce;
+                // Keep agent at fixed height (no bobbing)
             }
             
-            // Animate rewards (floating effect) - reduced for large grids
-            const time = Date.now() * 0.001;
-            if (CONFIG.gridSize <= 20) {
-                rewards.forEach((reward, index) => {
-                    if (!reward.userData.collected) {
-                        reward.position.y = reward.userData.originalY + Math.sin(time * 2 + index) * 0.1;
-                        reward.rotation.y = time * 0.5;
-                        
-                        if (rewardGlows[index]) {
-                            rewardGlows[index].position.y = reward.position.y;
-                            const scale = 1 + Math.sin(time * 3 + index) * 0.1;
-                            rewardGlows[index].scale.set(scale, scale, scale);
-                        }
-                    }
-                });
-            } else {
-                // Simplified animation for large grids
-                rewards.forEach((reward, index) => {
-                    if (!reward.userData.collected) {
-                        reward.rotation.y = time * 0.5;
-                    }
-                });
-            }
+            // Keep rewards at fixed position (no floating animation)
             
-            // Animate agent (subtle pulsing)
-            if (agent) {
-                const scale = 1 + Math.sin(time * 3) * 0.05;
-                agent.scale.set(scale, scale, scale);
-            }
+            // No agent animations
             
-            // Auto-rotate if enabled
-            if (document.getElementById('autoRotate').checked) {
-                gridWorld.rotation.y += 0.002;
+            // Update camera for follow mode
+            if (followCamera && agent) {
+                // Set target position with offset
+                cameraTargetPosition.copy(agent.position);
+                cameraTargetPosition.add(cameraOffset);
+                
+                // Smooth camera movement
+                camera.position.lerp(cameraTargetPosition, 0.1);
+                
+                // Update controls target to look at agent
+                controls.target.lerp(agent.position, 0.1);
+                controls.update();
             }
             
             // Update collection animations
@@ -1346,17 +1371,20 @@
         };
         
         window.resetCamera = function() {
-            const cameraDistance = CONFIG.gridSize > 20 ? CONFIG.gridSize * 1.2 : CONFIG.gridSize * 1.5;
+            const cameraDistance = CONFIG.gridSize > 20 ? CONFIG.gridSize * 1.5 : CONFIG.gridSize * 2.0;
             const cameraHeight = CONFIG.gridSize > 20 ? CONFIG.gridSize * 0.8 : CONFIG.gridSize * 1.2;
             
-            camera.position.set(cameraDistance, cameraHeight, cameraDistance);
+            // Side view position
+            camera.position.set(CONFIG.gridSize / 2, cameraHeight, cameraDistance);
             controls.target.set(CONFIG.gridSize / 2, 0, CONFIG.gridSize / 2);
             controls.update();
         };
         
-        window.toggleAutoRotate = function() {
-            if (!document.getElementById('autoRotate').checked && gridWorld) {
-                gridWorld.rotation.y = 0;
+        window.toggleFollowCamera = function() {
+            followCamera = document.getElementById('followCamera').checked;
+            if (!followCamera) {
+                // Reset camera when disabling follow mode
+                resetCamera();
             }
         };
         
@@ -1478,12 +1506,28 @@
                         data: [],
                         borderColor: '#E91E63',
                         backgroundColor: 'rgba(233, 30, 99, 0.1)',
-                        tension: 0.1
+                        pointRadius: 5,
+                        pointHoverRadius: 7,
+                        showLine: false,  // Show only points, no connecting lines
+                        yAxisID: 'y'
+                    }, {
+                        label: 'Mean Membrane Potential (mV)',
+                        data: [],
+                        borderColor: '#4CAF50',
+                        backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                        pointRadius: 5,
+                        pointHoverRadius: 7,
+                        showLine: false,  // Show only points, no connecting lines
+                        yAxisID: 'y1'
                     }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
                     plugins: {
                         legend: {
                             labels: { color: 'white' }
@@ -1491,19 +1535,30 @@
                         tooltip: {
                             callbacks: {
                                 label: function(context) {
-                                    const step = context.parsed.x;
+                                    const stepIndex = context.dataIndex;
+                                    const step = analyticsData.neuralActivitySteps[stepIndex];
                                     const data = trajectoryData?.trajectory[step];
                                     if (data?.neuralActivity) {
-                                        const firingRate = data.neuralActivity.firingRateHz || 
-                                            ((data.neuralActivity.spikeCount / 256) * 1000.0);
-                                        return [
-                                            `Firing Rate: ${firingRate.toFixed(1)} Hz`,
-                                            `Spike Count: ${data.neuralActivity.spikeCount}`,
-                                            `Mean Potential: ${data.neuralActivity.meanPotential.toFixed(1)} mV`,
-                                            `Max Potential: ${data.neuralActivity.maxPotential.toFixed(1)} mV`
-                                        ];
+                                        if (context.datasetIndex === 0) {
+                                            // Firing rate dataset
+                                            const firingRate = context.parsed.y;
+                                            return [
+                                                `Step: ${step}`,
+                                                `Firing Rate: ${firingRate.toFixed(1)} Hz`,
+                                                `Spike Count: ${data.neuralActivity.spikeCount}`
+                                            ];
+                                        } else {
+                                            // Membrane potential dataset
+                                            const potential = context.parsed.y;
+                                            return [
+                                                `Step: ${step}`,
+                                                `Mean Potential: ${potential.toFixed(1)} mV`,
+                                                `Max Potential: ${data.neuralActivity.maxPotential.toFixed(1)} mV`,
+                                                `Min Potential: ${data.neuralActivity.minPotential.toFixed(1)} mV`
+                                            ];
+                                        }
                                     }
-                                    return `Firing Rate: ${(context.parsed.y * 10).toFixed(1)} Hz`;
+                                    return context.dataset.label + ': ' + context.parsed.y.toFixed(1);
                                 }
                             }
                         }
@@ -1511,13 +1566,30 @@
                     scales: {
                         x: {
                             title: { display: true, text: 'Step', color: 'white' },
-                            ticks: { color: 'white' },
+                            ticks: { 
+                                color: 'white',
+                                callback: function(value, index, values) {
+                                    // Show actual timestep value
+                                    return this.getLabelForValue(value);
+                                }
+                            },
                             grid: { color: 'rgba(255, 255, 255, 0.1)' }
                         },
                         y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
                             title: { display: true, text: 'Firing Rate (Hz)', color: 'white' },
                             ticks: { color: 'white' },
                             grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: { display: true, text: 'Membrane Potential (mV)', color: 'white' },
+                            ticks: { color: 'white' },
+                            grid: { drawOnChartArea: false }
                         }
                     }
                 }
@@ -1533,7 +1605,10 @@
                 rewardTimestamps: [],
                 timeBetweenRewards: [],
                 gradientValues: [],
-                neuralActivity: []
+                neuralActivity: [],
+                neuralActivitySteps: [],  // Track which timesteps have neural data
+                neuralActivityValues: [],   // Store only the actual neural values
+                meanPotentialValues: []     // Store mean membrane potential values
             };
             
             let lastRewardStep = 0;
@@ -1559,19 +1634,26 @@
                 
                 // Extract neural activity data if available
                 if (step.neuralActivity) {
-                    // Use actual firing rate in Hz if available, otherwise calculate from spike count
+                    // Use actual firing rate in Hz if available
                     let firingRate = 0;
                     if (step.neuralActivity.firingRateHz !== undefined) {
-                        // Use pre-calculated firing rate, normalize to typical 0-10Hz range
-                        firingRate = step.neuralActivity.firingRateHz / 10.0;
+                        // Use pre-calculated firing rate
+                        firingRate = step.neuralActivity.firingRateHz;
                     } else if (step.neuralActivity.spikeCount !== undefined) {
-                        // Fallback: estimate from spike count (assuming 256 neurons, 1ms timestep)
-                        firingRate = (step.neuralActivity.spikeCount / 256) * 1000.0 / 10.0;
+                        // Fallback: estimate from spike count
+                        const totalNeurons = trajectoryData.metadata.totalNeurons || 256;
+                        const dt = trajectoryData.metadata.simulationDt || 1.0;
+                        firingRate = (step.neuralActivity.spikeCount / totalNeurons / dt) * 1000.0;
                     }
                     analyticsData.neuralActivity.push(firingRate);
+                    // Track timesteps with neural data
+                    analyticsData.neuralActivitySteps.push(index);
+                    analyticsData.neuralActivityValues.push(firingRate);
+                    // Also store mean membrane potential
+                    analyticsData.meanPotentialValues.push(step.neuralActivity.meanPotential || 0);
                 } else {
-                    // Fallback for episodes without neural data
-                    analyticsData.neuralActivity.push(0);
+                    // For timesteps without neural data (due to sampling), use NaN to show gaps
+                    analyticsData.neuralActivity.push(NaN);
                 }
             });
         }
@@ -1607,10 +1689,20 @@
             
             // Update network chart
             if (networkChart) {
-                networkChart.data.labels = currentData.steps;
-                // Scale back to Hz for display (data is normalized to 0-1 range)
-                const scaledData = currentData.neuralActivity.map(rate => rate * 10);
-                networkChart.data.datasets[0].data = scaledData;
+                // Filter to only show timesteps that have neural data
+                const neuralStepsUpToCurrent = analyticsData.neuralActivitySteps.filter(step => step <= currentStep);
+                const neuralValuesUpToCurrent = neuralStepsUpToCurrent.map((step, idx) => 
+                    analyticsData.neuralActivityValues[idx]
+                );
+                const potentialValuesUpToCurrent = neuralStepsUpToCurrent.map((step, idx) => 
+                    analyticsData.meanPotentialValues[idx]
+                );
+                
+                networkChart.data.labels = neuralStepsUpToCurrent;
+                // Use actual firing rates in Hz (no scaling needed)
+                networkChart.data.datasets[0].data = neuralValuesUpToCurrent;
+                // Add mean membrane potential data
+                networkChart.data.datasets[1].data = potentialValuesUpToCurrent;
                 networkChart.update('none');
             }
         }

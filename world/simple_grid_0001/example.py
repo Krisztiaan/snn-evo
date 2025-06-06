@@ -20,6 +20,12 @@ def random_agent(key: random.PRNGKey, n_steps: int = 1000):
     )
     world = SimpleGridWorld(config)
     
+    # Get and display world metadata
+    metadata = world.get_metadata()
+    print(f"World: {metadata['name']} v{metadata['version']}")
+    print(f"Description: {metadata['description']}")
+    print()
+    
     # Reset world
     reset_key, action_key = random.split(key)
     state, obs = world.reset(reset_key)
@@ -42,7 +48,7 @@ def random_agent(key: random.PRNGKey, n_steps: int = 1000):
         if result.reward > 0:
             total_reward += result.reward
             if result.reward >= config.reward_value:
-                print(f"Step {step}: Collected reward! Total: {total_reward}")
+                print(f"Step {step}: Collected reward! Total: {total_reward} (respawned at farthest position)")
         
         if result.done:
             print(f"Episode finished at step {step}")
@@ -61,6 +67,11 @@ def gradient_following_agent(key: random.PRNGKey, n_steps: int = 1000):
     config = WorldConfig(grid_size=30, n_rewards=20)
     world = SimpleGridWorld(config)
     
+    # Get and display world metadata
+    metadata = world.get_metadata()
+    print(f"World: {metadata['name']} v{metadata['version']}")
+    print()
+    
     # Reset
     reset_key, action_key = random.split(key)
     state, obs = world.reset(reset_key)
@@ -76,7 +87,7 @@ def gradient_following_agent(key: random.PRNGKey, n_steps: int = 1000):
         best_gradient = -1.0
         
         for action in range(4):
-            # Simulate taking this action
+            # Simulate taking this action (no key needed for simulation)
             result = world.step(state, action)
             if result.observation.gradient > best_gradient:
                 best_gradient = result.observation.gradient

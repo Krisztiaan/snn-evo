@@ -1,6 +1,10 @@
 proj.txt
 logs
 
+# node, vite, vue
+node_modules
+dist
+
 # Created by https://www.toptal.com/developers/gitignore/api/python,visualstudiocode,macos,windows,vim
 # Edit at https://www.toptal.com/developers/gitignore?templates=python,visualstudiocode,macos,windows,vim
 

@@ -125,7 +125,7 @@ class ExperimentAPIHandler(BaseHTTPRequestHandler):
                 world_setup = episode.get_static_data("world_setup")
                 reward_positions = world_setup.get("reward_positions", [])
                 neural_states = episode.get_neural_states()
-                spike_data = episode.get_spikes()  # Get sparse spike data
+                spike_data = episode.get_spikes()  # Get sparse spike data (may be empty)
 
                 world_config = config.get('world_config', {})
 
@@ -140,7 +140,11 @@ class ExperimentAPIHandler(BaseHTTPRequestHandler):
                         'nRewards': len(reward_positions),
                         'totalSteps': len(positions),
                         'seed': config.get('seed', -1),
-                        'episodeId': episode_id
+                        'episodeId': episode_id,
+                        'simulationDt': simulation_dt,
+                        'neuralSamplingRate': neural_sampling_rate,
+                        'hasNeuralData': has_neural_data,
+                        'totalNeurons': total_neurons
                     },
                     'trajectory': [],
                     'world': {'rewardPositions': reward_positions.tolist()}
@@ -153,12 +157,38 @@ class ExperimentAPIHandler(BaseHTTPRequestHandler):
                 # Process neural states if available
                 has_neural_data = neural_states and 'v' in neural_states
                 
-                # Pre-process spike data to count spikes per timestep
-                spike_counts_per_step = {}
+                # Get timesteps for behavior data - these are our reference timesteps
+                behavior_timesteps = behavior.get('timesteps', np.arange(len(positions)))
+                
+                # Create neural state timestep mapping
+                neural_timestep_map = {}
+                if has_neural_data and 'timesteps' in neural_states:
+                    neural_timesteps = neural_states['timesteps']
+                    for idx, ts in enumerate(neural_timesteps):
+                        neural_timestep_map[ts] = idx
+                
+                # Pre-process spike data to count spikes per actual timestep
+                spike_counts_per_timestep = {}
+                
+                # Check for sparse spike data first (newer format)
                 if spike_data and 'timesteps' in spike_data:
                     spike_timesteps = spike_data['timesteps']
-                    for t in spike_timesteps:
-                        spike_counts_per_step[t] = spike_counts_per_step.get(t, 0) + 1
+                    neuron_ids = spike_data.get('neuron_ids', spike_data.get('values', []))
+                    for t, neuron_id in zip(spike_timesteps, neuron_ids):
+                        spike_counts_per_timestep[t] = spike_counts_per_timestep.get(t, 0) + 1
+                
+                # If no sparse spike data, check for dense spike data in neural_states
+                elif neural_states and 'spikes' in neural_states:
+                    # Dense spike format: rows are timesteps, columns are neurons
+                    dense_spikes = neural_states['spikes']
+                    neural_timesteps = neural_states.get('timesteps', np.arange(len(dense_spikes)))
+                    
+                    for idx, timestep in enumerate(neural_timesteps):
+                        if idx < len(dense_spikes):
+                            # Count number of spikes (1s) in this timestep
+                            spike_count = int(np.sum(dense_spikes[idx]))
+                            if spike_count > 0:
+                                spike_counts_per_timestep[timestep] = spike_count
                 
                 # Get network size for proper normalization
                 network_params = config.get('network_params', {})
@@ -169,10 +199,19 @@ class ExperimentAPIHandler(BaseHTTPRequestHandler):
                                    network_params.get('NUM_PROCESSING', 192) + 
                                    network_params.get('NUM_READOUT', 32))
                 
+                # Get simulation parameters from metadata
+                metadata = loader.get_metadata()
+                simulation_dt = metadata.get('simulation_dt', 1.0)  # Default 1ms timestep
+                neural_sampling_rate = metadata.get('neural_sampling_rate', network_params.get('neural_sampling_rate', 100))
+                
                 for i in range(len(positions)):
+                    # Get the actual timestep for this behavior sample
+                    current_timestep = int(behavior_timesteps[i])
+                    
                     step_reward = 0.0
                     if rewards_log and 'timesteps' in rewards_log:
-                        reward_mask = rewards_log['timesteps'] == i
+                        # Match rewards by actual timestep, not array index
+                        reward_mask = rewards_log['timesteps'] == current_timestep
                         if np.any(reward_mask):
                             step_reward = float(
                                 np.sum(rewards_log['rewards'][reward_mask]))
@@ -197,24 +236,49 @@ class ExperimentAPIHandler(BaseHTTPRequestHandler):
                     }
                     
                     # Add neural activity metrics if available
-                    if has_neural_data and i < len(neural_states['v']):
-                        # Calculate mean membrane potential
-                        v_values = neural_states['v'][i]
+                    if has_neural_data:
+                        # Find the nearest neural state sample for this timestep
+                        neural_idx = None
+                        if current_timestep in neural_timestep_map:
+                            # Exact match
+                            neural_idx = neural_timestep_map[current_timestep]
+                        else:
+                            # Find nearest sampled timestep
+                            if neural_timestep_map:
+                                # Get all neural timesteps and find closest
+                                neural_ts_list = sorted(neural_timestep_map.keys())
+                                # Find the largest timestep <= current_timestep
+                                for ts in reversed(neural_ts_list):
+                                    if ts <= current_timestep:
+                                        neural_idx = neural_timestep_map[ts]
+                                        break
                         
-                        # Get spike count from sparse data
-                        spike_count = spike_counts_per_step.get(i, 0)
-                        
-                        # Calculate instantaneous firing rate (spikes/neuron/ms -> Hz)
-                        # dt = 1ms assumed for all phases
-                        firing_rate_hz = (spike_count / total_neurons) * 1000.0 if total_neurons > 0 else 0.0
-                        
-                        step_data['neuralActivity'] = {
-                            'meanPotential': float(np.mean(v_values)),
-                            'spikeCount': spike_count,
-                            'firingRateHz': firing_rate_hz,
-                            'maxPotential': float(np.max(v_values)),
-                            'minPotential': float(np.min(v_values))
-                        }
+                        if neural_idx is not None and neural_idx < len(neural_states['v']):
+                            # Get neural state data
+                            v_values = neural_states['v'][neural_idx]
+                            
+                            # Get spike count from the same neural sample
+                            spike_count = 0
+                            if 'spikes' in neural_states and neural_idx < len(neural_states['spikes']):
+                                # Count spikes in this neural sample
+                                spike_count = int(np.sum(neural_states['spikes'][neural_idx]))
+                            else:
+                                # Fall back to sparse spike data if available
+                                spike_count = spike_counts_per_timestep.get(current_timestep, 0)
+                            
+                            # Calculate instantaneous firing rate (spikes/neuron/timestep -> Hz)
+                            # Convert to Hz: spikes per neuron per millisecond * 1000
+                            firing_rate_hz = (spike_count / total_neurons / simulation_dt) * 1000.0 if total_neurons > 0 else 0.0
+                            
+                            step_data['neuralActivity'] = {
+                                'meanPotential': float(np.mean(v_values)),
+                                'spikeCount': spike_count,
+                                'firingRateHz': firing_rate_hz,
+                                'maxPotential': float(np.max(v_values)),
+                                'minPotential': float(np.min(v_values)),
+                                'timestep': current_timestep,
+                                'neuralTimestep': int(neural_ts_list[neural_idx]) if 'neural_ts_list' in locals() else current_timestep
+                            }
                     
                     viz_data['trajectory'].append(step_data)
 

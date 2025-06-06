@@ -1,14 +1,14 @@
-# models/phase_0_8/agent.py
-# keywords: [snn agent, phase 0.8, best-of-all-worlds, principled implementation]
+# models/phase_0_10/agent.py
+# keywords: [snn agent, phase 0.10, multi-episode learning, weight persistence, adaptive learning rate]
 """
-Phase 0.8 SNN Agent: Principled synthesis of best ideas from phases 0.4-0.7
+Phase 0.10 SNN Agent: Multi-episode learning with weight persistence
 
-Key improvements:
-1. Clear separation of neuron populations with unified dynamics
-2. Proper two-trace STDP (missing in 0.5/0.6)
-3. Fixed input weights with learning only on processing/readout
-4. Homeostatic firing rate control
-5. Biologically motivated connectivity
+Key improvements over 0.9:
+1. Weight persistence across episodes
+2. Adaptive learning rate schedule
+3. Weight momentum for smoother learning
+4. Soft state resets between episodes
+5. Optional weight consolidation
 """
 
 from typing import Dict, Any, NamedTuple, Tuple, Optional
@@ -62,6 +62,10 @@ class AgentState(NamedTuple):
     
     # Input representation
     input_channels: jnp.ndarray # Current population-coded input
+    
+    # Multi-episode learning
+    weight_momentum: jnp.ndarray  # Momentum for weight updates
+    episodes_completed: int       # Track number of episodes for adaptive learning
 
 
 # === HELPER FUNCTIONS ===
@@ -72,6 +76,15 @@ def _apply_dale_principle(w: jnp.ndarray, is_excitatory: jnp.ndarray) -> jnp.nda
     # Pre-synaptic neuron determines sign (rows in weight matrix)
     E_mask = is_excitatory[:, None]
     return jnp.where(E_mask, jnp.abs(w), -jnp.abs(w))
+
+
+@partial(jit, static_argnames=['params'])
+def _get_adaptive_learning_rate(episodes_completed: int, params: NetworkParams) -> float:
+    """Compute learning rate that adapts across episodes."""
+    decay_rate = params.LEARNING_RATE_DECAY
+    min_rate = params.MIN_LEARNING_RATE
+    adaptive_rate = params.BASE_LEARNING_RATE * (decay_rate ** episodes_completed)
+    return jnp.maximum(adaptive_rate, min_rate)
 
 
 @partial(jit, static_argnames=['params'])
@@ -362,17 +375,21 @@ def _compute_eligibility_trace(state: AgentState, params: NetworkParams) -> jnp.
 
 
 @partial(jit, static_argnames=['params'])
-def _three_factor_learning(state: AgentState, reward: float, params: NetworkParams) -> AgentState:
+def _three_factor_learning(state: AgentState, reward: float, gradient: float, params: NetworkParams) -> AgentState:
     """
-    Three-factor learning rule with RPE-based dopamine modulation.
+    Three-factor learning rule with gradient-proportional dopamine modulation and momentum.
     """
     # 1. Compute reward prediction error
     td_error = reward + params.REWARD_DISCOUNT * state.value_estimate - state.value_estimate
     new_value = state.value_estimate + params.REWARD_PREDICTION_RATE * td_error
     
-    # 2. Update dopamine based on RPE
+    # 2. Update dopamine based on RPE + gradient bonus
+    # Add gradient-proportional reward to encourage following gradients
+    gradient_reward = gradient * params.GRADIENT_REWARD_SCALE
+    total_reward_signal = td_error * 0.5 + gradient_reward
+    
     decay = jnp.exp(-1.0 / params.TAU_DOPAMINE)
-    dopamine_response = state.dopamine * decay + params.BASELINE_DOPAMINE * (1 - decay) + td_error * 0.5
+    dopamine_response = state.dopamine * decay + params.BASELINE_DOPAMINE * (1 - decay) + total_reward_signal
     new_dopamine = jnp.clip(dopamine_response, 0.0, 2.0)
     
     # 3. Compute dopamine modulation factor
@@ -382,14 +399,21 @@ def _three_factor_learning(state: AgentState, reward: float, params: NetworkPara
     # 4. Update eligibility traces
     new_eligibility = _compute_eligibility_trace(state, params)
     
-    # 5. Compute weight updates
-    dw = params.BASE_LEARNING_RATE * modulation * new_eligibility
+    # 5. Get adaptive learning rate
+    adaptive_lr = _get_adaptive_learning_rate(state.episodes_completed, params)
+    
+    # 6. Compute weight updates with momentum
+    dw = adaptive_lr * modulation * new_eligibility
+    
+    # Apply momentum
+    momentum_decay = params.WEIGHT_MOMENTUM_DECAY
+    new_momentum = state.weight_momentum * momentum_decay + dw * (1 - momentum_decay)
     
     # Add weight decay
-    dw -= params.WEIGHT_DECAY * state.w * state.w_plastic_mask
+    weight_penalty = params.WEIGHT_DECAY * state.w * state.w_plastic_mask
     
-    # 6. Update weights with soft bounds
-    w_new = state.w + dw
+    # 7. Update weights with momentum and soft bounds
+    w_new = state.w + new_momentum - weight_penalty
     
     # Soft saturation using tanh (from phase 0.4)
     # Split into input and neural parts
@@ -416,10 +440,117 @@ def _three_factor_learning(state: AgentState, reward: float, params: NetworkPara
     
     return state._replace(
         w=w_new,
+        weight_momentum=new_momentum,
         eligibility_trace=new_eligibility * 0.9,  # Decay after use
         dopamine=new_dopamine,
         value_estimate=new_value
     )
+
+
+@partial(jit, static_argnames=['params', 'soft_reset'])
+def _reset_episode_state(state: AgentState, params: NetworkParams, soft_reset: bool = True) -> AgentState:
+    """
+    Reset state for new episode while preserving weights and some homeostatic information.
+    
+    Args:
+        state: Current agent state
+        params: Network parameters
+        soft_reset: If True, preserve some information across episodes
+    """
+    n_total = len(state.neuron_types)
+    
+    if soft_reset:
+        # Soft reset preserves some information
+        return state._replace(
+            # Neural dynamics - reset completely
+            v=jnp.full(n_total, params.V_REST),
+            spike=jnp.zeros(n_total, dtype=bool),
+            refractory=jnp.zeros(n_total),
+            
+            # Synaptic state - reset completely
+            syn_current_e=jnp.zeros(n_total),
+            syn_current_i=jnp.zeros(n_total),
+            trace_fast=jnp.zeros(n_total),
+            trace_slow=jnp.zeros(n_total),
+            
+            # Homeostasis - partial preservation
+            firing_rate=state.firing_rate * 0.9 + params.TARGET_RATE_HZ * 0.1,
+            threshold_adapt=state.threshold_adapt * 0.9,
+            
+            # Learning - partial preservation
+            eligibility_trace=jnp.zeros_like(state.eligibility_trace),
+            dopamine=state.dopamine * 0.8 + params.BASELINE_DOPAMINE * 0.2,
+            value_estimate=state.value_estimate * 0.5,
+            
+            # Weights preserved
+            # w, w_mask, w_plastic_mask unchanged
+            
+            # Identity preserved
+            # is_excitatory, neuron_types unchanged
+            
+            # I/O - reset
+            motor_trace=jnp.zeros(4),
+            input_channels=jnp.zeros(params.NUM_INPUT_CHANNELS),
+            
+            # Multi-episode learning - increment episode counter
+            # weight_momentum preserved
+            episodes_completed=state.episodes_completed + 1
+        )
+    else:
+        # Hard reset - only preserve weights and structure
+        return state._replace(
+            v=jnp.full(n_total, params.V_REST),
+            spike=jnp.zeros(n_total, dtype=bool),
+            refractory=jnp.zeros(n_total),
+            syn_current_e=jnp.zeros(n_total),
+            syn_current_i=jnp.zeros(n_total),
+            trace_fast=jnp.zeros(n_total),
+            trace_slow=jnp.zeros(n_total),
+            firing_rate=jnp.full(n_total, params.TARGET_RATE_HZ),
+            threshold_adapt=jnp.zeros(n_total),
+            eligibility_trace=jnp.zeros_like(state.eligibility_trace),
+            dopamine=params.BASELINE_DOPAMINE,
+            value_estimate=0.0,
+            motor_trace=jnp.zeros(4),
+            input_channels=jnp.zeros(params.NUM_INPUT_CHANNELS),
+            episodes_completed=state.episodes_completed + 1
+        )
+
+
+@partial(jit, static_argnames=['params'])
+def _consolidate_weights(state: AgentState, params: NetworkParams) -> AgentState:
+    """
+    Optional weight consolidation between episodes to maintain stability.
+    """
+    if not params.WEIGHT_CONSOLIDATION:
+        return state
+    
+    # Compute weight statistics
+    n_in = params.NUM_INPUT_CHANNELS
+    w_neural = state.w[:, n_in:]
+    
+    # Normalize weights to prevent runaway growth
+    w_mean = jnp.mean(jnp.abs(w_neural[state.w_mask[:, n_in:]]))
+    target_mean = params.WEIGHT_CONSOLIDATION_TARGET
+    
+    if w_mean > 0:
+        scale_factor = target_mean / w_mean
+        # Soft scaling to avoid abrupt changes
+        scale_factor = 1.0 + (scale_factor - 1.0) * params.WEIGHT_CONSOLIDATION_RATE
+        
+        # Scale neural weights
+        w_neural_scaled = w_neural * scale_factor
+        
+        # Apply Dale's principle
+        w_neural_scaled = _apply_dale_principle(w_neural_scaled, state.is_excitatory)
+        
+        # Update weights
+        w_new = state.w.at[:, n_in:].set(w_neural_scaled)
+        w_new = jnp.where(state.w_mask, w_new, 0.0)
+        
+        return state._replace(w=w_new)
+    
+    return state
 
 
 # === ACTION SELECTION ===
@@ -463,7 +594,7 @@ def _decode_action(state: AgentState, params: NetworkParams, key: random.PRNGKey
 # === MAIN AGENT CLASS ===
 
 class SnnAgent:
-    """Phase 0.8 SNN Agent with principled design."""
+    """Phase 0.10 SNN Agent with multi-episode learning capabilities."""
     
     def __init__(self, config: SnnAgentConfig):
         self.config = config
@@ -535,7 +666,11 @@ class SnnAgent:
             
             # I/O
             motor_trace=jnp.zeros(4),
-            input_channels=jnp.zeros(p.NUM_INPUT_CHANNELS)
+            input_channels=jnp.zeros(p.NUM_INPUT_CHANNELS),
+            
+            # Multi-episode learning
+            weight_momentum=jnp.zeros_like(w),
+            episodes_completed=0
         )
     
     def _monitor_stability(self, state: AgentState, step: int):
@@ -561,9 +696,16 @@ class SnnAgent:
         import time
         episode_start_time = time.time()
         
-        # Reset world and agent
+        # Reset world
         world_state, obs = self.world.reset(episode_key)
-        self.state = self._initialize_state(episode_key)
+        
+        # Reset agent state (soft reset by default, preserving weights)
+        if episode_num > 0:
+            self.state = _reset_episode_state(self.state, self.params, soft_reset=True)
+        
+        # Optional weight consolidation
+        if episode_num > 0 and episode_num % self.params.CONSOLIDATION_INTERVAL == 0:
+            self.state = _consolidate_weights(self.state, self.params)
         
         # Start data export
         ep = exporter.start_episode(episode_num)
@@ -600,7 +742,7 @@ class SnnAgent:
             world_state, obs, reward, done = result.state, result.observation, result.reward, result.done
             
             # 5. Learning step
-            self.state = _three_factor_learning(self.state, reward, self.params)
+            self.state = _three_factor_learning(self.state, reward, obs.gradient, self.params)
             
             # 6. Track rewards
             if reward > 0:
@@ -614,13 +756,13 @@ class SnnAgent:
                 elapsed = time.time() - episode_start_time
                 progress_callback(step, max_steps, rewards_collected, elapsed)
             
-            # 9. Data logging (match phase 0_5/0_6 style + gradient)
+            # 9. Data logging (with efficient buffered spike support)
             exporter.log(
                 timestep=step,
                 neural_state={
-                    "v": np.asarray(self.state.v),
-                    "spikes": np.asarray(self.state.spike.astype(jnp.uint8))
+                    "v": np.asarray(self.state.v)
                 },
+                spikes=np.asarray(self.state.spike),  # Separate spikes for buffered storage
                 behavior={
                     "action": int(action),
                     "pos_x": int(world_state.agent_pos[0]),
@@ -642,7 +784,10 @@ class SnnAgent:
             # Enhanced fields (optional, won't break older analysis)
             "mean_firing_rate": float(jnp.mean(self.state.firing_rate)),
             "final_dopamine": float(self.state.dopamine),
-            "final_value_estimate": float(self.state.value_estimate)
+            "final_value_estimate": float(self.state.value_estimate),
+            # Multi-episode learning fields
+            "episodes_completed": int(self.state.episodes_completed),
+            "current_learning_rate": float(_get_adaptive_learning_rate(self.state.episodes_completed, self.params))
         }
         
         exporter.end_episode(success=jnp.all(world_state.reward_collected), summary=summary)
@@ -691,13 +836,13 @@ class SnnAgent:
         exporter.log_static_episode_data("network_stats", enhanced_data)
     
     def run_experiment(self):
-        """Run complete experiment."""
+        """Run complete experiment with multi-episode learning."""
         import time
         master_key = random.PRNGKey(self.config.exp_config.seed)
         
         print("Initializing data exporter...")
         with DataExporter(
-            experiment_name="snn_agent_phase08",
+            experiment_name="snn_agent_phase10",
             output_base_dir=self.config.exp_config.export_dir,
             compression='gzip', 
             compression_level=1
@@ -714,6 +859,8 @@ class SnnAgent:
             
             for i in range(self.config.exp_config.n_episodes):
                 print(f"\n--- Episode {i+1}/{self.config.exp_config.n_episodes} ---")
+                print(f"Current learning rate: {_get_adaptive_learning_rate(self.state.episodes_completed, self.params):.6f}")
+                
                 episode_key, master_key = random.split(master_key)
                 episode_start = time.time()
                 
@@ -778,6 +925,12 @@ class SnnAgent:
                 if i > 0:
                     reward_trend = summary['total_reward'] - all_summaries[0]['total_reward']
                     print(f"  Reward Δ from first: {reward_trend:+.2f}")
+                    
+                    # Check improvement over last 5 episodes
+                    if i >= 5:
+                        recent_avg = sum(s['total_reward'] for s in all_summaries[-5:]) / 5
+                        early_avg = sum(s['total_reward'] for s in all_summaries[:5]) / 5
+                        improvement = recent_avg - early_avg
+                        print(f"  Avg reward improvement (last 5 vs first 5): {improvement:+.2f}")
         
         return all_summaries
-
