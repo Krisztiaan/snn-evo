@@ -722,7 +722,7 @@ class SnnAgent:
         max_steps = self.config.world_config.max_timesteps
         for step in range(max_steps):
             # Split keys
-            step_key, encode_key, neuron_key, action_key = random.split(episode_key, 4)
+            step_key, encode_key, neuron_key, action_key, world_key = random.split(episode_key, 5)
             episode_key = step_key
             
             # 1. Encode input
@@ -738,7 +738,7 @@ class SnnAgent:
             self.state = self.state._replace(motor_trace=motor_trace)
             
             # 4. Environment step
-            result = self.world.step(world_state, int(action))
+            result = self.world.step(world_state, int(action), world_key)
             world_state, obs, reward, done = result.state, result.observation, result.reward, result.done
             
             # 5. Learning step
@@ -756,18 +756,18 @@ class SnnAgent:
                 elapsed = time.time() - episode_start_time
                 progress_callback(step, max_steps, rewards_collected, elapsed)
             
-            # 9. Data logging (with efficient buffered spike support)
+            # 9. Data logging (optimized - spikes handled separately)
             exporter.log(
                 timestep=step,
                 neural_state={
-                    "v": np.asarray(self.state.v)
+                    "v": self.state.v  # Keep as JAX array, converted only when saved
                 },
-                spikes=np.asarray(self.state.spike),  # Separate spikes for buffered storage
+                spikes=self.state.spike,  # Separate for efficient sparse handling
                 behavior={
                     "action": int(action),
                     "pos_x": int(world_state.agent_pos[0]),
                     "pos_y": int(world_state.agent_pos[1]),
-                    "gradient": float(obs.gradient)  # Add gradient logging
+                    "gradient": float(obs.gradient)
                 },
                 reward=float(reward)
             )

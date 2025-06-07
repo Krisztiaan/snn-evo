@@ -21,7 +21,9 @@ class Episode:
                  h5_file: h5py.File,
                  neural_sampling_rate: int = 100,
                  validate_data: bool = True,
-                 spike_buffer_size: int = 1000):
+                 spike_buffer_size: int = 1000,
+                 compression_kwargs: Optional[Dict[str, Any]] = None,
+                 no_write: bool = False):
         """Initialize episode within an HDF5 file.
         
         Args:
@@ -30,29 +32,44 @@ class Episode:
             neural_sampling_rate: Sample neural state every N timesteps
             validate_data: Whether to validate data before saving
             spike_buffer_size: Number of timesteps to buffer spikes before flushing
+            compression_kwargs: Compression settings for datasets
+            no_write: Skip all file I/O operations
         """
         self.episode_id = episode_id
         self.h5_file = h5_file
         self.neural_sampling_rate = neural_sampling_rate
         self.validate_data = validate_data
         self.spike_buffer_size = spike_buffer_size
+        self._compression_kwargs = compression_kwargs or {}
+        self.no_write = no_write
         
-        # Create episode group
-        self.group = h5_file.create_group(f'episode_{episode_id:04d}')
-        
-        # Metadata
-        self.group.attrs['episode_id'] = episode_id
-        self.group.attrs['start_time'] = datetime.now().isoformat()
-        self.group.attrs['neural_sampling_rate'] = neural_sampling_rate
-        self.group.attrs['status'] = 'running'
-        
-        # Create subgroups
-        self.neural_group = self.group.create_group('neural_states')
-        self.spike_group = self.group.create_group('spikes')
-        self.behavior_group = self.group.create_group('behavior')
-        self.reward_group = self.group.create_group('rewards')
-        self.weight_group = self.group.create_group('weight_changes')
-        self.event_group = self.group.create_group('events')
+        # Initialize groups (create only if writing)
+        if not self.no_write:
+            # Create episode group
+            self.group = h5_file.create_group(f'episode_{episode_id:04d}')
+            
+            # Metadata
+            self.group.attrs['episode_id'] = episode_id
+            self.group.attrs['start_time'] = datetime.now().isoformat()
+            self.group.attrs['neural_sampling_rate'] = neural_sampling_rate
+            self.group.attrs['status'] = 'running'
+            
+            # Create subgroups
+            self.neural_group = self.group.create_group('neural_states')
+            self.spike_group = self.group.create_group('spikes')
+            self.behavior_group = self.group.create_group('behavior')
+            self.reward_group = self.group.create_group('rewards')
+            self.weight_group = self.group.create_group('weight_changes')
+            self.event_group = self.group.create_group('events')
+        else:
+            # Set to None when not writing
+            self.group = None
+            self.neural_group = None
+            self.spike_group = None
+            self.behavior_group = None
+            self.reward_group = None
+            self.weight_group = None
+            self.event_group = None
         
         # Tracking
         self.timestep_count = 0
@@ -70,6 +87,11 @@ class Episode:
                      behavior: Optional[Dict[str, Any]] = None,
                      reward: Optional[float] = None):
         """Log data for a single timestep."""
+        # Skip all operations if not writing
+        if self.no_write:
+            self.timestep_count += 1
+            return
+            
         # Validate if enabled
         if self.validate_data:
             warnings_list = validate_timestep_data(timestep, neural_state, spikes, behavior, reward)
@@ -111,6 +133,9 @@ class Episode:
                           new_weight: float,
                           **kwargs):
         """Log weight change event."""
+        if self.no_write:
+            return
+            
         if self.validate_data:
             warnings_list = validate_weight_change(timestep, synapse_id, old_weight, new_weight)
             for w in warnings_list:
@@ -133,6 +158,9 @@ class Episode:
         
     def log_event(self, event_type: str, timestep: int, data: Dict[str, Any]):
         """Log custom event."""
+        if self.no_write:
+            return
+            
         if event_type not in self.event_group:
             self.event_group.create_group(event_type)
         event_subgroup = self.event_group[event_type]
@@ -140,6 +168,9 @@ class Episode:
         
     def end(self, success: bool = False, final_state: Optional[Dict[str, Any]] = None):
         """End episode and save metadata."""
+        if self.no_write:
+            return
+            
         # Flush any remaining spike data
         if self._spike_buffer_times:
             self._flush_spike_buffer()
@@ -208,7 +239,7 @@ class Episode:
                 maxshape=(None,), 
                 dtype='i8',
                 chunks=(1000,),
-                **self.exporter._compression_kwargs  # Apply compression
+                **self._compression_kwargs  # Apply compression
             )
             group.attrs['_allocated_size'] = 0
             
@@ -248,7 +279,7 @@ class Episode:
                     
                 group.create_dataset(key, shape=shape, maxshape=maxshape, 
                                    dtype=value_np.dtype, chunks=chunks,
-                                   **self.exporter._compression_kwargs)
+                                   **self._compression_kwargs)
                 
             # Append value
             group[key][current_size] = value_np
@@ -341,7 +372,8 @@ class DataExporter:
                  validate_data: bool = True,
                  compression: str = 'gzip',
                  compression_level: int = 4,
-                 simulation_dt: float = 1.0):
+                 simulation_dt: float = 1.0,
+                 no_write: bool = False):
         """Initialize exporter.
         
         Args:
@@ -352,16 +384,19 @@ class DataExporter:
             compression: HDF5 compression ('gzip', 'lzf', None)
             compression_level: Compression level (1-9 for gzip)
             simulation_dt: Simulation timestep in milliseconds (default 1.0)
+            no_write: Skip all file I/O operations (for benchmarking)
         """
         self.experiment_name = experiment_name
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.neural_sampling_rate = neural_sampling_rate
         self.validate_data = validate_data
         self.simulation_dt = simulation_dt
+        self.no_write = no_write
         
-        # Create output directory
+        # Create output directory (only if writing)
         self.output_dir = Path(output_base_dir) / f"{experiment_name}_{self.timestamp}"
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        if not self.no_write:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
         
         # HDF5 settings
         self.compression = compression
@@ -375,43 +410,53 @@ class DataExporter:
                 'compression_opts': self.compression_opts
             }
             
-        # Create main HDF5 file
+        # Create main HDF5 file (only if writing)
         self.h5_path = self.output_dir / 'experiment_data.h5'
-        self.h5_file = h5py.File(self.h5_path, 'w')
+        if not self.no_write:
+            self.h5_file = h5py.File(self.h5_path, 'w')
+        else:
+            self.h5_file = None
         
-        # Set experiment metadata
-        self.h5_file.attrs['experiment_name'] = experiment_name
-        self.h5_file.attrs['timestamp'] = self.timestamp
-        self.h5_file.attrs['start_time'] = datetime.now().isoformat()
-        self.h5_file.attrs['schema_version'] = SCHEMA_VERSION
-        self.h5_file.attrs['neural_sampling_rate'] = neural_sampling_rate
-        self.h5_file.attrs['compression'] = compression or 'none'
+        # Set experiment metadata (only if writing)
+        if not self.no_write:
+            self.h5_file.attrs['experiment_name'] = experiment_name
+            self.h5_file.attrs['timestamp'] = self.timestamp
+            self.h5_file.attrs['start_time'] = datetime.now().isoformat()
+            self.h5_file.attrs['schema_version'] = SCHEMA_VERSION
+            self.h5_file.attrs['neural_sampling_rate'] = neural_sampling_rate
+            self.h5_file.attrs['compression'] = compression or 'none'
         
-        # Add simulation parameters metadata
-        self.h5_file.attrs['simulation_dt'] = self.simulation_dt
-        self.h5_file.attrs['behavior_sampling_rate'] = 1  # Every timestep
-        self.h5_file.attrs['data_format_version'] = '1.1'  # Version with proper timestep handling
-        
-        # Create groups
-        self.episodes_group = self.h5_file.create_group('episodes')
-        self.checkpoints_group = self.h5_file.create_group('checkpoints')
+        # Add simulation parameters metadata (only if writing)
+        if not self.no_write:
+            self.h5_file.attrs['simulation_dt'] = self.simulation_dt
+            self.h5_file.attrs['behavior_sampling_rate'] = 1  # Every timestep
+            self.h5_file.attrs['data_format_version'] = '1.1'  # Version with proper timestep handling
+            
+            # Create groups
+            self.episodes_group = self.h5_file.create_group('episodes')
+            self.checkpoints_group = self.h5_file.create_group('checkpoints')
+        else:
+            self.episodes_group = None
+            self.checkpoints_group = None
         
         # State
         self.current_episode: Optional[Episode] = None
         self.episode_count = 0
         
-        print(f"Initialized DataExporter: {self.output_dir}")
-        
         # Automatically capture runtime info
         self.save_runtime_info()
         
-        # Capture command line arguments if running as script
-        import sys
-        if len(sys.argv) > 0:
-            self.h5_file.attrs['command_line'] = ' '.join(sys.argv)
+        # Capture command line arguments if running as script (only if writing)
+        if not self.no_write:
+            import sys
+            if len(sys.argv) > 0:
+                self.h5_file.attrs['command_line'] = ' '.join(sys.argv)
         
     def save_config(self, config: Dict[str, Any]):
         """Save experiment configuration."""
+        if self.no_write:
+            return
+            
         # Save as JSON for readability
         with open(self.output_dir / 'config.json', 'w') as f:
             json.dump(config, f, indent=2)
@@ -430,6 +475,9 @@ class DataExporter:
                 
     def save_metadata(self, metadata: Dict[str, Any]):
         """Save additional experiment metadata (author, description, etc)."""
+        if self.no_write:
+            return
+            
         # Update root attributes
         for key, value in metadata.items():
             if isinstance(value, (dict, list)):
@@ -465,6 +513,9 @@ class DataExporter:
             'output_directory': str(self.output_dir)
         }
         
+        if self.no_write:
+            return runtime_info
+            
         # Store in HDF5
         if 'runtime' in self.h5_file:
             del self.h5_file['runtime']
@@ -485,8 +536,10 @@ class DataExporter:
         Args:
             code_files: List of Python files to snapshot. If None, saves the main script.
         """
+        if self.no_write:
+            return
+            
         import sys
-        import inspect
         
         code_group = self.h5_file.create_group('code_snapshot')
         
@@ -526,6 +579,9 @@ class DataExporter:
     
     def save_git_info(self):
         """Save git repository information if available."""
+        if self.no_write:
+            return None
+            
         try:
             import subprocess
             
@@ -581,6 +637,9 @@ class DataExporter:
                               connections: Dict[str, Any],
                               initial_weights: Optional[Union[np.ndarray, Dict[str, Any]]] = None):
         """Save network structure."""
+        if self.no_write:
+            return
+            
         if self.validate_data:
             warnings_list = validate_network_structure(neurons, connections)
             for w in warnings_list:
@@ -644,11 +703,14 @@ class DataExporter:
             episode_id=episode_id,
             h5_file=self.episodes_group,
             neural_sampling_rate=self.neural_sampling_rate,
-            validate_data=self.validate_data
+            validate_data=self.validate_data,
+            compression_kwargs=self._compression_kwargs,
+            no_write=self.no_write
         )
         
         self.episode_count += 1
-        self.h5_file.attrs['episode_count'] = self.episode_count
+        if not self.no_write:
+            self.h5_file.attrs['episode_count'] = self.episode_count
         
         return self.current_episode
         
@@ -660,6 +722,10 @@ class DataExporter:
             
         self.current_episode.end(success=success)
         
+        if self.no_write:
+            self.current_episode = None
+            return
+            
         # Update experiment summary
         if 'episode_summaries' not in self.h5_file:
             self.h5_file.create_group('episode_summaries')
@@ -704,8 +770,18 @@ class DataExporter:
                 reward=kwargs.get('reward')
             )
             
+    def log_static_episode_data(self, name: str, data: Dict[str, Any]):
+        """Save static, one-off data for the current episode."""
+        if self.current_episode is None:
+            raise RuntimeError("No active episode. Call start_episode() first.")
+        # For now, log as an event at timestep 0
+        self.current_episode.log_event(f"static_{name}", 0, data)
+            
     def save_checkpoint(self, name: str, data: Dict[str, Any]):
         """Save checkpoint."""
+        if self.no_write:
+            return
+            
         checkpoint = self.checkpoints_group.create_group(f"{name}_{datetime.now().strftime('%H%M%S')}")
         checkpoint.attrs['timestamp'] = datetime.now().isoformat()
         checkpoint.attrs['episode_count'] = self.episode_count
@@ -719,14 +795,16 @@ class DataExporter:
         if self.current_episode is not None:
             self.current_episode.end(success=False)
             
+        # Skip file operations if not writing
+        if self.no_write:
+            return
+            
         # Update final metadata
         self.h5_file.attrs['end_time'] = datetime.now().isoformat()
         self.h5_file.attrs['total_episodes'] = self.episode_count
         
         # Close file
         self.h5_file.close()
-        
-        print(f"Experiment complete. Data saved to: {self.output_dir}")
         
     def __enter__(self):
         return self

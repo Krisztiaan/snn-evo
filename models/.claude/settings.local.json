@@ -3,7 +3,9 @@
     "allow": [
       "Bash(h5dump:*)",
       "Bash(cp:*)",
-      "Bash(awk:*)"
+      "Bash(awk:*)",
+      "Bash(python test_respawn_performance.py:*)",
+      "Bash(python:*)"
     ],
     "deny": []
   }

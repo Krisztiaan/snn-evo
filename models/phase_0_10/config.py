@@ -12,7 +12,7 @@ Key additions over phase 0.9:
 """
 
 from typing import NamedTuple
-from world.simple_grid_0001 import WorldConfig
+from world.simple_grid_0001.types import WorldConfig
 
 
 class NetworkParams(NamedTuple):

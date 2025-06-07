@@ -1,11 +1,19 @@
-# keywords: [utils, numpy, jax, conversion, helpers]
+# keywords: [utils, numpy, jax, conversion, helpers, batch]
 """Utility functions for data export."""
 
 import json
 import numpy as np
 from pathlib import Path
-from typing import Any, Union
+from typing import Any, Union, List, Dict
 from collections import defaultdict
+
+# Check JAX availability
+try:
+    import jax
+    jax_available = True
+except ImportError:
+    jax = None
+    jax_available = False
 
 
 def ensure_numpy(arr: Any) -> np.ndarray:
@@ -17,8 +25,16 @@ def ensure_numpy(arr: Any) -> np.ndarray:
     - PyTorch tensors
     - Lists, tuples
     - Already numpy arrays
+    - Strings (converts to bytes for HDF5 compatibility)
     """
+    # Handle strings specially for HDF5 compatibility
+    if isinstance(arr, str):
+        return np.array(arr.encode('utf-8'))
+    
     if isinstance(arr, np.ndarray):
+        # Convert Unicode strings to bytes for HDF5
+        if arr.dtype.kind == 'U':
+            return arr.astype('S')
         return arr
         
     # Check for JAX arrays
@@ -37,9 +53,111 @@ def ensure_numpy(arr: Any) -> np.ndarray:
         
     # Fallback to numpy conversion
     try:
-        return np.array(arr)
+        result = np.array(arr)
+        # Convert Unicode strings to bytes
+        if result.dtype.kind == 'U':
+            result = result.astype('S')
+        return result
     except Exception as e:
         raise TypeError(f"Cannot convert {type(arr)} to numpy array: {e}")
+
+
+def batch_convert_jax(arrays: List[Any]) -> List[np.ndarray]:
+    """Efficiently convert multiple JAX arrays to numpy in batch.
+    
+    This is more efficient than converting arrays one by one as JAX
+    can optimize the device-to-host transfer.
+    
+    Args:
+        arrays: List of arrays (can be JAX, numpy, or other array-like)
+        
+    Returns:
+        List of numpy arrays
+    """
+    if not arrays:
+        return []
+        
+    # If JAX is not available, fall back to individual conversion
+    if not jax_available:
+        return [ensure_numpy(arr) for arr in arrays]
+        
+    # Separate JAX arrays from others
+    jax_arrays = []
+    jax_indices = []
+    other_arrays = []
+    
+    for i, arr in enumerate(arrays):
+        if hasattr(arr, '_value') and hasattr(arr, 'device'):
+            # It's a JAX array
+            jax_arrays.append(arr)
+            jax_indices.append(i)
+        else:
+            other_arrays.append((i, arr))
+            
+    # If no JAX arrays, just convert normally
+    if not jax_arrays:
+        return [ensure_numpy(arr) for arr in arrays]
+        
+    # Batch convert JAX arrays
+    try:
+        # Use device_get for efficient batch transfer
+        numpy_arrays = jax.device_get(jax_arrays)
+        if not isinstance(numpy_arrays, list):
+            numpy_arrays = [numpy_arrays]
+    except Exception:
+        # Fall back to individual conversion if batch fails
+        numpy_arrays = [ensure_numpy(arr) for arr in jax_arrays]
+        
+    # Combine results in original order
+    result = [None] * len(arrays)
+    
+    # Insert JAX arrays
+    for idx, np_arr in zip(jax_indices, numpy_arrays):
+        result[idx] = np_arr
+        
+    # Insert other arrays
+    for idx, arr in other_arrays:
+        result[idx] = ensure_numpy(arr)
+        
+    return result
+
+
+def optimize_jax_conversion(data: Dict[str, Any]) -> Dict[str, np.ndarray]:
+    """Optimize conversion of dictionary containing JAX arrays.
+    
+    Converts all JAX arrays in the dictionary to numpy arrays using
+    batch conversion for efficiency.
+    
+    Args:
+        data: Dictionary potentially containing JAX arrays
+        
+    Returns:
+        Dictionary with all arrays converted to numpy
+    """
+    if not jax_available:
+        return {k: ensure_numpy(v) if hasattr(v, '__array__') else v 
+                for k, v in data.items()}
+    
+    # Collect all array values
+    keys = []
+    arrays = []
+    non_arrays = {}
+    
+    for key, value in data.items():
+        if hasattr(value, '__array__') or hasattr(value, '_value'):
+            keys.append(key)
+            arrays.append(value)
+        else:
+            non_arrays[key] = value
+            
+    # Batch convert arrays
+    if arrays:
+        numpy_arrays = batch_convert_jax(arrays)
+        result = {k: v for k, v in zip(keys, numpy_arrays)}
+        result.update(non_arrays)
+        return result
+    else:
+        return non_arrays
 
 
 class NumpyEncoder(json.JSONEncoder):

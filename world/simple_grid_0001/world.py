@@ -62,14 +62,16 @@ class SimpleGridWorld:
         observation = self._get_observation(state)
         return state, observation
     
-    def step(self, state: WorldState, action: int) -> StepResult:
+    def step(self, state: WorldState, action: int, key: random.PRNGKey = None) -> StepResult:
         """Take a step in the world."""
         # Update position based on action (0=up, 1=right, 2=down, 3=left)
         new_pos = self._move_agent(state.agent_pos, action)
         
-        # Generate key for potential reward respawning using timestep as seed
-        # This ensures deterministic behavior based on world state
-        respawn_key = random.PRNGKey(state.timestep)
+        # Use provided key or generate deterministic key from timestep
+        if key is None:
+            respawn_key = random.PRNGKey(state.timestep)
+        else:
+            respawn_key = key
         
         # Check reward collection and respawn
         reward, new_collected, new_reward_positions = self._collect_rewards(

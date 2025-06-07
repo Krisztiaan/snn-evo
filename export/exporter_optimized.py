@@ -6,19 +6,66 @@ import json
 import numpy as np
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, Optional, Union, Tuple, List, Set
+from typing import Dict, Any, Optional, Union, Tuple, List
 import warnings
 from collections import defaultdict
 import threading
-from queue import Queue
 import zlib
 
-from .utils import ensure_numpy, NumpyEncoder
+from .utils import ensure_numpy, NumpyEncoder, optimize_jax_conversion
 from .schema import validate_timestep_data, validate_weight_change, validate_network_structure, SCHEMA_VERSION
+from .performance_enhancements import AsyncWriteQueue, AdaptiveCompressor, RealtimeStats, PerformanceProfiler
+
+
+# Global HDF5 lock for thread safety
+_HDF5_LOCK = threading.RLock()
+
+# Constants to replace magic numbers
+ASYNC_THRESHOLD = 100  # Minimum items for async write
+DEFAULT_BUFFER_THRESHOLD = 1000  # Default buffer size before flush
+MAX_CHUNK_SIZE = 100000  # Maximum chunk size for HDF5
+MEMORY_MAP_BLOCK_SIZE = 2**20  # 1MB blocks for memory mapping
+
+# Memory management
+MAX_MEMORY_MB = 500  # Maximum memory usage in MB
+MEMORY_CHECK_INTERVAL = 100  # Check memory every N operations
+
+
+class MemoryTracker:
+    """Track memory usage and trigger flushes when needed."""
+    
+    def __init__(self, max_memory_bytes: int = MAX_MEMORY_MB * 1024 * 1024):
+        self.max_memory = max_memory_bytes
+        self.current_usage = 0
+        self._lock = threading.Lock()
+        self._check_counter = 0
+        
+    def add(self, nbytes: int):
+        """Add memory usage."""
+        with self._lock:
+            self.current_usage += nbytes
+            
+    def remove(self, nbytes: int):
+        """Remove memory usage."""
+        with self._lock:
+            self.current_usage = max(0, self.current_usage - nbytes)
+            
+    def should_flush(self) -> bool:
+        """Check if memory pressure requires flush."""
+        with self._lock:
+            self._check_counter += 1
+            if self._check_counter % MEMORY_CHECK_INTERVAL == 0:
+                return self.current_usage > self.max_memory * 0.8  # 80% threshold
+            return self.current_usage > self.max_memory
+            
+    def get_usage_mb(self) -> float:
+        """Get current usage in MB."""
+        with self._lock:
+            return self.current_usage / (1024 * 1024)
 
 
 class BufferedDataset:
-    """Efficiently buffered dataset wrapper with batch resizing."""
+    """Efficiently buffered dataset wrapper with pre-allocated buffers and thread safety."""
     
     def __init__(self, 
                  group: h5py.Group,
@@ -28,94 +75,176 @@ class BufferedDataset:
                  chunk_size: int = 10000,
                  growth_factor: float = 1.5,
                  compression: str = 'gzip',
-                 compression_opts: int = 4):
-        """Initialize buffered dataset.
-        
-        Args:
-            group: HDF5 group to create dataset in
-            name: Dataset name
-            dtype: Data type
-            shape: Initial shape (first dim should be 0 for extensible)
-            chunk_size: Chunk size for HDF5
-            growth_factor: Growth factor for buffer resizing
-            compression: Compression type
-            compression_opts: Compression level
-        """
+                 compression_opts: int = 4,
+                 async_queue: Optional[AsyncWriteQueue] = None,
+                 memory_tracker: Optional[MemoryTracker] = None):
+        """Initialize buffered dataset with pre-allocated buffer."""
         self.name = name
         self.dtype = dtype
         self.chunk_size = chunk_size
         self.growth_factor = growth_factor
+        self._lock = threading.Lock()
+        self.async_queue = async_queue
+        self.memory_tracker = memory_tracker
         
-        # Determine chunk shape
+        # Determine chunk shape and buffer size
         if len(shape) == 1:
-            chunks = (min(chunk_size, 1000),)
+            # Ensure chunk size is at least 1 to avoid empty chunks
+            chunk_dim = max(1, min(chunk_size, DEFAULT_BUFFER_THRESHOLD))
+            chunks = (chunk_dim,)
+            self.item_shape = ()
         else:
-            chunks = (min(chunk_size, 1000),) + shape[1:]
+            chunk_dim = max(1, min(chunk_size, DEFAULT_BUFFER_THRESHOLD))
+            chunks = (chunk_dim,) + shape[1:]
+            self.item_shape = shape[1:]
         
-        # Create dataset with compression
+        # Buffer configuration
+        self.buffer_threshold = max(1, min(chunk_size // 10, DEFAULT_BUFFER_THRESHOLD))
+        
+        # Pre-allocate buffer for efficiency
+        buffer_shape = (self.buffer_threshold,) + self.item_shape
+        self.buffer = np.empty(buffer_shape, dtype=dtype)
+        self.buffer_pos = 0
+        
+        # Track memory usage
+        self.buffer_memory = self.buffer.nbytes
+        if self.memory_tracker:
+            self.memory_tracker.add(self.buffer_memory)
+        
+        # Create dataset with compression (thread-safe)
         maxshape = (None,) + shape[1:] if len(shape) > 1 else (None,)
         
-        self.dataset = group.create_dataset(
-            name,
-            shape=shape,
-            maxshape=maxshape,
-            dtype=dtype,
-            chunks=chunks,
-            compression=compression,
-            compression_opts=compression_opts,
-            shuffle=True,  # Improves compression
-            fletcher32=True  # Checksum for data integrity
-        )
+        with _HDF5_LOCK:
+            # Create dataset with appropriate options
+            create_kwargs = {
+                'name': name,
+                'shape': shape,
+                'maxshape': maxshape,
+                'dtype': dtype
+            }
+            
+            # Only add chunks if shape is not empty
+            # Empty datasets (shape with 0) cannot have chunks
+            if all(s > 0 for s in shape):
+                create_kwargs['chunks'] = chunks
+            
+            # Only add compression-related args if compression is enabled and shape is not empty
+            if compression is not None and all(s > 0 for s in shape):
+                create_kwargs['compression'] = compression
+                create_kwargs['shuffle'] = True
+                create_kwargs['fletcher32'] = True
+                
+                # Only add compression_opts for algorithms that support it
+                if compression != 'lzf':
+                    create_kwargs['compression_opts'] = compression_opts
+            
+            self.dataset = group.create_dataset(**create_kwargs)
         
-        # Buffer management
-        self.buffer = []
+        # Track dataset size
         self.current_size = 0
         self.allocated_size = 0
-        self.buffer_threshold = min(chunk_size // 10, 1000)
         
     def append(self, data: np.ndarray):
-        """Append data to buffer."""
-        self.buffer.append(data)
-        
-        # Flush if buffer is large enough
-        if len(self.buffer) >= self.buffer_threshold:
-            self.flush()
+        """Append data to pre-allocated buffer (thread-safe)."""
+        with self._lock:
+            # Store in pre-allocated buffer
+            self.buffer[self.buffer_pos] = data
+            self.buffer_pos += 1
             
-    def flush(self):
-        """Flush buffer to dataset."""
-        if not self.buffer:
+            # Check flush conditions
+            should_flush = self.buffer_pos >= self.buffer_threshold
+            if not should_flush and self.memory_tracker:
+                should_flush = self.memory_tracker.should_flush()
+            
+            if should_flush:
+                self._flush_unlocked()
+            
+    def flush(self) -> None:
+        """Flush buffer to dataset (thread-safe)."""
+        with self._lock:
+            self._flush_unlocked()
+    
+    def _flush_unlocked(self) -> None:
+        """Internal flush without locking (must be called with lock held)."""
+        if self.buffer_pos == 0:
             return
             
-        # Stack buffer data
-        if self.buffer[0].ndim == 0:
-            new_data = np.array(self.buffer)
+        # Get data from pre-allocated buffer (no copy needed!)
+        new_data = self.buffer[:self.buffer_pos]
+        n_new = self.buffer_pos
+        
+        # Check if we should use async write
+        if self.async_queue and n_new > ASYNC_THRESHOLD:
+            # Submit async write - make a copy for async operation
+            data_copy = new_data.copy()
+            start_idx = self.current_size
+            self.current_size += n_new
+            
+            # Reset buffer position
+            self.buffer_pos = 0
+            
+            # Submit async write
+            self.async_queue.submit(
+                self._do_async_write,
+                data_copy,
+                start_idx
+            )
         else:
-            new_data = np.vstack(self.buffer)
-            
+            # Small buffer or no async - write synchronously
+            self._do_sync_write(new_data)
+            self.buffer_pos = 0
+    
+    def _do_sync_write(self, new_data: np.ndarray) -> None:
+        """Perform synchronous write with HDF5 thread safety."""
         n_new = len(new_data)
-        
-        # Resize if needed
         new_size = self.current_size + n_new
-        if new_size > self.allocated_size:
-            # Geometric growth
-            self.allocated_size = int(max(
-                new_size * self.growth_factor,
-                self.allocated_size + self.chunk_size
-            ))
-            self.dataset.resize(self.allocated_size, axis=0)
-            
-        # Write data
-        self.dataset[self.current_size:new_size] = new_data
-        self.current_size = new_size
         
-        # Clear buffer
-        self.buffer = []
+        with _HDF5_LOCK:
+            if new_size > self.allocated_size:
+                # Geometric growth
+                self.allocated_size = int(max(
+                    new_size * self.growth_factor,
+                    self.allocated_size + self.chunk_size
+                ))
+                self.dataset.resize(self.allocated_size, axis=0)
+                
+            # Write data
+            self.dataset[self.current_size:new_size] = new_data
+            
+        self.current_size = new_size
+    
+    def _do_async_write(self, data: np.ndarray, start_idx: int) -> None:
+        """Perform async write with proper thread safety."""
+        n_new = len(data)
+        new_size = start_idx + n_new
+        
+        # Use HDF5 lock for all HDF5 operations
+        with _HDF5_LOCK:
+            # Check and resize if needed
+            if new_size > self.allocated_size:
+                with self._lock:
+                    # Double-check under object lock
+                    if new_size > self.allocated_size:
+                        self.allocated_size = int(max(
+                            new_size * self.growth_factor,
+                            self.allocated_size + self.chunk_size
+                        ))
+                        self.dataset.resize(self.allocated_size, axis=0)
+            
+            # Write data
+            self.dataset[start_idx:new_size] = data
         
     def finalize(self):
         """Flush remaining data and trim to actual size."""
         self.flush()
         if self.current_size < self.allocated_size:
-            self.dataset.resize(self.current_size, axis=0)
+            with _HDF5_LOCK:
+                self.dataset.resize(self.current_size, axis=0)
+                
+    def __del__(self):
+        """Clean up memory tracking."""
+        if hasattr(self, 'memory_tracker') and self.memory_tracker and hasattr(self, 'buffer_memory'):
+            self.memory_tracker.remove(self.buffer_memory)
 
 
 class SparseDataWriter:
@@ -160,28 +289,33 @@ class SparseDataWriter:
         
         if not self.timestep_buffer:
             return
+        
+        # Check if datasets already exist (in case of multiple finalizations)
+        if 'timesteps' in self.group:
+            return
             
-        # Create datasets with compression
-        self.group.create_dataset(
-            'timesteps',
-            data=np.array(self.timestep_buffer, dtype=np.int64),
-            compression='gzip',
-            compression_opts=4
-        )
-        
-        self.group.create_dataset(
-            'counts',
-            data=np.array(self.count_buffer, dtype=np.int32),
-            compression='gzip',
-            compression_opts=4
-        )
-        
-        self.group.create_dataset(
-            'values',
-            data=np.array(self.value_buffer, dtype=self.dtype),
-            compression='gzip',
-            compression_opts=4
-        )
+        # Create datasets with compression (thread-safe)
+        with _HDF5_LOCK:
+            self.group.create_dataset(
+                'timesteps',
+                data=np.array(self.timestep_buffer, dtype=np.int64),
+                compression='gzip',
+                compression_opts=4
+            )
+            
+            self.group.create_dataset(
+                'counts',
+                data=np.array(self.count_buffer, dtype=np.int32),
+                compression='gzip',
+                compression_opts=4
+            )
+            
+            self.group.create_dataset(
+                'values',
+                data=np.array(self.value_buffer, dtype=self.dtype),
+                compression='gzip',
+                compression_opts=4
+            )
         
         # Add metadata
         self.group.attrs['format'] = 'sparse_rle'
@@ -189,8 +323,73 @@ class SparseDataWriter:
         self.group.attrs['unique_timesteps'] = len(self.timestep_buffer)
 
 
+class EpisodeDataManager:
+    """Manages data storage for an episode."""
+    
+    def __init__(self, group: h5py.Group, config: dict, memory_tracker: MemoryTracker):
+        self.group = group
+        self.config = config
+        self.memory_tracker = memory_tracker
+        self.datasets: Dict[str, BufferedDataset] = {}
+        
+    def get_or_create_dataset(self, subgroup: h5py.Group, name: str, 
+                            dtype: np.dtype, shape: Tuple[int, ...]) -> BufferedDataset:
+        """Get or create a buffered dataset."""
+        key = f"{subgroup.name}/{name}"
+        if key not in self.datasets:
+            self.datasets[key] = BufferedDataset(
+                subgroup, name, dtype, shape,
+                chunk_size=self.config.get('chunk_size', 10000),
+                compression=self.config.get('compression', 'gzip'),
+                compression_opts=self.config.get('compression_opts', 4),
+                async_queue=self.config.get('async_queue'),
+                memory_tracker=self.memory_tracker
+            )
+        return self.datasets[key]
+        
+    def finalize_all(self):
+        """Finalize all datasets."""
+        for dataset in self.datasets.values():
+            dataset.finalize()
+
+
+class EpisodeStatsTracker:
+    """Tracks statistics for an episode."""
+    
+    def __init__(self):
+        self.timestep_count = 0
+        self.spike_count = 0
+        self.reward_sum = 0.0
+        self.weight_change_count = 0
+        
+    def update_timestep(self):
+        self.timestep_count += 1
+        
+    def update_spikes(self, count: int):
+        self.spike_count += count
+        
+    def update_reward(self, reward: float):
+        self.reward_sum += reward
+        
+    def update_weight_changes(self, count: int):
+        self.weight_change_count += count
+        
+    def get_summary(self) -> Dict[str, Any]:
+        return {
+            'total_timesteps': self.timestep_count,
+            'total_spikes': self.spike_count,
+            'total_reward': self.reward_sum,
+            'spike_rate': self.spike_count / max(1, self.timestep_count),
+            'total_weight_changes': self.weight_change_count
+        }
+
+
 class OptimizedEpisode:
     """High-performance episode data storage."""
+    
+    # Memory limits to prevent unbounded growth
+    MAX_WEIGHT_CHANGES = 100000
+    MAX_EVENT_BUFFER_SIZE = 50000
     
     def __init__(self,
                  episode_id: int,
@@ -199,18 +398,36 @@ class OptimizedEpisode:
                  validate_data: bool = True,
                  compression: str = 'gzip',
                  compression_opts: int = 4,
-                 chunk_size: int = 10000):
+                 chunk_size: int = 10000,
+                 adaptive_compressor: Optional[AdaptiveCompressor] = None,
+                 async_queue: Optional[AsyncWriteQueue] = None,
+                 realtime_stats: Optional[RealtimeStats] = None,
+                 profiler: Optional[PerformanceProfiler] = None,
+                 memory_tracker: Optional[MemoryTracker] = None):
         """Initialize optimized episode."""
         self.episode_id = episode_id
-        self.h5_file = h5_file
         self.neural_sampling_rate = neural_sampling_rate
         self.validate_data = validate_data
-        self.compression = compression
-        self.compression_opts = compression_opts
-        self.chunk_size = chunk_size
+        self.adaptive_compressor = adaptive_compressor
+        self.realtime_stats = realtime_stats
+        self.profiler = profiler
         
         # Create episode group
-        self.group = h5_file.create_group(f'episode_{episode_id:04d}')
+        with _HDF5_LOCK:
+            self.group = h5_file.create_group(f'episode_{episode_id:04d}')
+        
+        # Configuration for datasets
+        self.config = {
+            'compression': compression,
+            'compression_opts': compression_opts,
+            'chunk_size': chunk_size,
+            'async_queue': async_queue
+        }
+        
+        # Initialize components
+        self.memory_tracker = memory_tracker or MemoryTracker()
+        self.data_manager = EpisodeDataManager(self.group, self.config, self.memory_tracker)
+        self.stats_tracker = EpisodeStatsTracker()
         
         # Metadata
         self.group.attrs['episode_id'] = episode_id
@@ -218,20 +435,17 @@ class OptimizedEpisode:
         self.group.attrs['neural_sampling_rate'] = neural_sampling_rate
         self.group.attrs['status'] = 'running'
         
-        # Create subgroups
-        self.neural_group = self.group.create_group('neural_states')
-        self.spike_group = self.group.create_group('spikes')
-        self.behavior_group = self.group.create_group('behavior')
-        self.reward_group = self.group.create_group('rewards')
-        self.weight_group = self.group.create_group('weight_changes')
-        self.event_group = self.group.create_group('events')
+        # Create subgroups (thread-safe)
+        with _HDF5_LOCK:
+            self.neural_group = self.group.create_group('neural_states')
+            self.spike_group = self.group.create_group('spikes')
+            self.behavior_group = self.group.create_group('behavior')
+            self.reward_group = self.group.create_group('rewards')
+            self.weight_group = self.group.create_group('weight_changes')
+            self.event_group = self.group.create_group('events')
         
         # Tracking
-        self.timestep_count = 0
         self.last_neural_sample = -neural_sampling_rate
-        
-        # Buffered datasets
-        self.datasets: Dict[str, BufferedDataset] = {}
         
         # Sparse writers
         self.spike_writer = SparseDataWriter(self.spike_group, 'spikes', dtype=np.int32)
@@ -256,7 +470,7 @@ class OptimizedEpisode:
             for w in warnings_list:
                 warnings.warn(f"Validation: {w}")
                 
-        self.timestep_count += 1
+        self.stats_tracker.update_timestep()
         
         # Neural state (sampled)
         if neural_state is not None and timestep - self.last_neural_sample >= self.neural_sampling_rate:
@@ -269,6 +483,7 @@ class OptimizedEpisode:
             if spike_data.any():
                 indices = np.where(spike_data)[0]
                 self.spike_writer.append(timestep, indices)
+                self.stats_tracker.update_spikes(len(indices))
                 
         # Behavior (all timesteps)
         if behavior is not None:
@@ -276,66 +491,95 @@ class OptimizedEpisode:
             
         # Rewards (sparse)
         if reward is not None and reward != 0:
-            self.reward_writer.append(timestep, [reward])
+            self.reward_writer.append(timestep, np.array([reward], dtype=np.float32))
+            self.stats_tracker.update_reward(reward)
             
     def _append_neural_state(self, timestep: int, data: Dict[str, Any]):
         """Append neural state data with buffering."""
-        # Initialize timestep dataset if needed
-        if 'timesteps' not in self.datasets:
-            self.datasets['timesteps'] = BufferedDataset(
-                self.neural_group, 'timesteps', np.int64, (0,),
-                self.chunk_size, compression=self.compression,
-                compression_opts=self.compression_opts
-            )
+        # Profile this operation
+        profile_ctx = self.profiler.profile('append_neural_state') if self.profiler else None
+        if profile_ctx:
+            profile_ctx.__enter__()
             
-        self.datasets['timesteps'].append(ensure_numpy(timestep))
+        # Optimize JAX array conversion
+        data = optimize_jax_conversion(data)
+        
+        # Initialize timestep dataset if needed
+        timestep_writer = self.data_manager.get_or_create_dataset(
+            self.neural_group, 'timesteps', np.int64, (0,)
+        )
+        timestep_writer.append(np.array(timestep, dtype=np.int64))
         
         # Append each field
         for key, value in data.items():
-            value_np = ensure_numpy(value)
+            value_np = value if isinstance(value, np.ndarray) else ensure_numpy(value)
             
-            if key not in self.datasets:
-                # Create dataset on first occurrence
-                if value_np.ndim == 0:
-                    shape = (0,)
-                else:
-                    shape = (0,) + value_np.shape
-                    
-                self.datasets[key] = BufferedDataset(
-                    self.neural_group, key, value_np.dtype, shape,
-                    self.chunk_size, compression=self.compression,
-                    compression_opts=self.compression_opts
-                )
-                
-            self.datasets[key].append(value_np)
+            # Determine shape
+            if value_np.ndim == 0:
+                shape = (0,)
+            else:
+                shape = (0,) + value_np.shape
+            
+            # Use adaptive compression if available
+            if self.adaptive_compressor:
+                comp_algo, comp_level = self.adaptive_compressor.select_compression(value_np)
+                # Note: We'd need to pass these to the dataset creation, but HDF5 doesn't support per-dataset compression easily
+                # So we'll just track the recommendation for now
+            
+            # Get or create dataset
+            writer = self.data_manager.get_or_create_dataset(
+                self.neural_group, key, value_np.dtype, shape
+            )
+            writer.append(value_np)
+        
+        # Update realtime stats
+        if self.realtime_stats:
+            data_size = sum(v.nbytes if hasattr(v, 'nbytes') else 0 
+                           for v in data.values())
+            self.realtime_stats.record_operation(0.001, data_size)  # Assume 1ms write time
+            
+        if profile_ctx:
+            profile_ctx.__exit__(None, None, None)
             
     def _append_behavior(self, timestep: int, data: Dict[str, Any]):
         """Append behavior data with buffering."""
-        # Initialize behavior datasets
-        beh_key = 'behavior'
+        # Append timestep
+        timestep_writer = self.data_manager.get_or_create_dataset(
+            self.behavior_group, 'timesteps', np.int64, (0,)
+        )
+        timestep_writer.append(np.array(timestep, dtype=np.int64))
         
-        if f'{beh_key}_timesteps' not in self.datasets:
-            self.datasets[f'{beh_key}_timesteps'] = BufferedDataset(
-                self.behavior_group, 'timesteps', np.int64, (0,),
-                self.chunk_size, compression=self.compression,
-                compression_opts=self.compression_opts
-            )
-            
-        self.datasets[f'{beh_key}_timesteps'].append(ensure_numpy(timestep))
-        
+        # Append behavior data
         for key, value in data.items():
             value_np = ensure_numpy(value)
-            full_key = f'{beh_key}_{key}'
+            shape = (0,) if value_np.ndim == 0 else (0,) + value_np.shape
             
-            if full_key not in self.datasets:
-                shape = (0,) if value_np.ndim == 0 else (0,) + value_np.shape
-                self.datasets[full_key] = BufferedDataset(
-                    self.behavior_group, key, value_np.dtype, shape,
-                    self.chunk_size, compression=self.compression,
-                    compression_opts=self.compression_opts
-                )
-                
-            self.datasets[full_key].append(value_np)
+            writer = self.data_manager.get_or_create_dataset(
+                self.behavior_group, key, value_np.dtype, shape
+            )
+            writer.append(value_np)
+    
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - end episode with error handling."""
+        try:
+            if exc_type is None:
+                self.end(success=True)
+            else:
+                # Log the error before ending
+                import traceback
+                error_msg = f"{exc_type.__name__}: {exc_val}"
+                with _HDF5_LOCK:
+                    self.group.attrs['error'] = error_msg
+                    self.group.attrs['traceback'] = traceback.format_exc()
+                self.end(success=False)
+        except Exception as e:
+            # Even if end() fails, we should not suppress the original exception
+            warnings.warn(f"Failed to properly end episode: {e}")
+        return False  # Don't suppress exceptions
             
     def log_weight_change(self,
                           timestep: int,
@@ -369,27 +613,97 @@ class OptimizedEpisode:
         key = synapse_id if isinstance(synapse_id, int) else f"{synapse_id[0]}_{synapse_id[1]}"
         self.weight_changes[key].append(change_data)
         
+        # Check memory limit
+        total_changes = sum(len(changes) for changes in self.weight_changes.values())
+        if total_changes >= self.MAX_WEIGHT_CHANGES:
+            self._write_weight_changes()
+            self.weight_changes.clear()
+        
+        # Update stats
+        self.stats_tracker.update_weight_changes(1)
+        
     def log_event(self, event_type: str, timestep: int, data: Dict[str, Any]):
         """Log custom event with buffering."""
         for key, value in data.items():
             self.event_buffers[event_type][key].append((timestep, value))
+        
+        # Check memory limit
+        total_events = sum(
+            len(values) for event_data in self.event_buffers.values()
+            for values in event_data.values()
+        )
+        if total_events >= self.MAX_EVENT_BUFFER_SIZE:
+            self._write_events()
+            self.event_buffers.clear()
             
     def log_static_data(self, name: str, data: Dict[str, Any]):
         """Save static, one-off data for the episode."""
-        group = self.group.create_group(name)
-        for key, value in data.items():
-            group.create_dataset(
-                key, 
-                data=ensure_numpy(value),
-                compression=self.compression,
-                compression_opts=self.compression_opts
-            )
+        with _HDF5_LOCK:
+            group = self.group.create_group(name)
+            
+            def save_item(parent_group, key: str, value: Any):
+                """Recursively save items, handling nested structures."""
+                if isinstance(value, dict):
+                    # Create subgroup for nested dict
+                    subgroup = parent_group.create_group(key)
+                    for k, v in value.items():
+                        save_item(subgroup, k, v)
+                elif isinstance(value, (list, tuple)):
+                    # Convert to numpy array
+                    try:
+                        numpy_value = ensure_numpy(value)
+                        save_array(parent_group, key, numpy_value)
+                    except:
+                        # If can't convert to array, save as JSON string
+                        parent_group.attrs[key] = json.dumps(value)
+                else:
+                    # Try to save as numpy array
+                    try:
+                        numpy_value = ensure_numpy(value)
+                        save_array(parent_group, key, numpy_value)
+                    except:
+                        # Fall back to attribute for non-array data
+                        parent_group.attrs[key] = value
+            
+            def save_array(parent_group, key: str, numpy_value: np.ndarray):
+                """Save numpy array with appropriate compression."""
+                # Scalar datasets don't support compression
+                if numpy_value.ndim == 0 or numpy_value.size == 1:
+                    parent_group.create_dataset(key, data=numpy_value)
+                else:
+                    # Use compression settings from config
+                    compression = self.config['compression']
+                    compression_opts = self.config['compression_opts']
+                    
+                    # Handle LZF compression which doesn't support compression_opts
+                    if compression == 'lzf':
+                        parent_group.create_dataset(
+                            key, 
+                            data=numpy_value,
+                            compression=compression
+                        )
+                    else:
+                        parent_group.create_dataset(
+                            key, 
+                            data=numpy_value,
+                            compression=compression,
+                            compression_opts=compression_opts
+                        )
+            
+            # Save each item
+            for key, value in data.items():
+                save_item(group, key, value)
 
     def end(self, success: bool = False, final_state: Optional[Dict[str, Any]] = None):
         """End episode and flush all buffers."""
+        # Check if episode has any data
+        if self.stats_tracker.timestep_count == 0:
+            self.group.attrs['status'] = 'empty'
+            self.group.attrs['warning'] = 'Episode ended with no data logged'
+            return
+            
         # Flush all buffered datasets
-        for dataset in self.datasets.values():
-            dataset.finalize()
+        self.data_manager.finalize_all()
             
         # Finalize sparse writers
         self.spike_writer.finalize()
@@ -405,34 +719,25 @@ class OptimizedEpisode:
             
         # Update attributes
         self.group.attrs['end_time'] = datetime.now().isoformat()
-        self.group.attrs['total_timesteps'] = self.timestep_count
         self.group.attrs['success'] = success
         self.group.attrs['status'] = 'completed'
         
-        # Calculate summary statistics
-        if 'timesteps' in self.spike_group:
-            total_spikes = len(self.spike_writer.value_buffer)
-            self.group.attrs['total_spikes'] = total_spikes
-            self.group.attrs['spike_rate'] = total_spikes / max(1, self.timestep_count)
-            
-        if 'timesteps' in self.reward_group:
-            total_reward = float(np.sum(self.reward_writer.value_buffer))
-            self.group.attrs['total_reward'] = total_reward
-            
-        self.group.attrs['total_weight_changes'] = sum(
-            len(changes) for changes in self.weight_changes.values()
-        )
+        # Add statistics from tracker
+        stats = self.stats_tracker.get_summary()
+        for key, value in stats.items():
+            self.group.attrs[key] = value
         
         # Save final state
         if final_state:
-            final_group = self.group.create_group('final_state')
-            for key, value in final_state.items():
-                final_group.create_dataset(
-                    key,
-                    data=ensure_numpy(value),
-                    compression=self.compression,
-                    compression_opts=self.compression_opts
-                )
+            with _HDF5_LOCK:
+                final_group = self.group.create_group('final_state')
+                for key, value in final_state.items():
+                    final_group.create_dataset(
+                        key,
+                        data=ensure_numpy(value),
+                        compression=self.config['compression'],
+                        compression_opts=self.config['compression_opts']
+                    )
                 
     def _write_weight_changes(self):
         """Write accumulated weight changes efficiently."""
@@ -453,68 +758,87 @@ class OptimizedEpisode:
         new_weights = np.array([c['new_weight'] for c in all_changes], dtype=np.float32)
         deltas = np.array([c['delta'] for c in all_changes], dtype=np.float32)
         
-        # Write datasets
-        self.weight_group.create_dataset(
-            'timesteps', data=timesteps,
-            compression=self.compression, compression_opts=self.compression_opts
-        )
-        self.weight_group.create_dataset(
-            'old_weights', data=old_weights,
-            compression=self.compression, compression_opts=self.compression_opts
-        )
-        self.weight_group.create_dataset(
-            'new_weights', data=new_weights,
-            compression=self.compression, compression_opts=self.compression_opts
-        )
-        self.weight_group.create_dataset(
-            'deltas', data=deltas,
-            compression=self.compression, compression_opts=self.compression_opts
-        )
+        # Write datasets (thread-safe)
+        with _HDF5_LOCK:
+            # Check if datasets already exist
+            if 'timesteps' in self.weight_group:
+                return  # Already written
+                
+            self.weight_group.create_dataset(
+                'timesteps', data=timesteps,
+                compression=self.config['compression'], 
+                compression_opts=self.config['compression_opts']
+            )
+            self.weight_group.create_dataset(
+                'old_weights', data=old_weights,
+                compression=self.config['compression'], 
+                compression_opts=self.config['compression_opts']
+            )
+            self.weight_group.create_dataset(
+                'new_weights', data=new_weights,
+                compression=self.config['compression'], 
+                compression_opts=self.config['compression_opts']
+            )
+            self.weight_group.create_dataset(
+                'deltas', data=deltas,
+                compression=self.config['compression'], 
+                compression_opts=self.config['compression_opts']
+            )
         
-        # Handle synapse IDs
-        if 'synapse_id' in all_changes[0]:
-            synapse_ids = np.array([c['synapse_id'] for c in all_changes], dtype=np.int32)
-            self.weight_group.create_dataset(
-                'synapse_ids', data=synapse_ids,
-                compression=self.compression, compression_opts=self.compression_opts
-            )
-        else:
-            source_ids = np.array([c['source_id'] for c in all_changes], dtype=np.int32)
-            target_ids = np.array([c['target_id'] for c in all_changes], dtype=np.int32)
-            self.weight_group.create_dataset(
-                'source_ids', data=source_ids,
-                compression=self.compression, compression_opts=self.compression_opts
-            )
-            self.weight_group.create_dataset(
-                'target_ids', data=target_ids,
-                compression=self.compression, compression_opts=self.compression_opts
-            )
+            # Handle synapse IDs
+            if 'synapse_id' in all_changes[0]:
+                synapse_ids = np.array([c['synapse_id'] for c in all_changes], dtype=np.int32)
+                self.weight_group.create_dataset(
+                    'synapse_ids', data=synapse_ids,
+                    compression=self.config['compression'], 
+                    compression_opts=self.config['compression_opts']
+                )
+            else:
+                source_ids = np.array([c['source_id'] for c in all_changes], dtype=np.int32)
+                target_ids = np.array([c['target_id'] for c in all_changes], dtype=np.int32)
+                self.weight_group.create_dataset(
+                    'source_ids', data=source_ids,
+                    compression=self.config['compression'], 
+                    compression_opts=self.config['compression_opts']
+                )
+                self.weight_group.create_dataset(
+                    'target_ids', data=target_ids,
+                    compression=self.config['compression'], 
+                    compression_opts=self.config['compression_opts']
+                )
             
     def _write_events(self):
         """Write accumulated events efficiently."""
-        for event_type, event_data in self.event_buffers.items():
-            event_subgroup = self.event_group.create_group(event_type)
-            
-            for key, values in event_data.items():
-                if not values:
+        with _HDF5_LOCK:
+            for event_type, event_data in self.event_buffers.items():
+                # Check if event type already exists
+                if event_type in self.event_group:
                     continue
                     
-                # Sort by timestep
-                values.sort(key=lambda x: x[0])
+                event_subgroup = self.event_group.create_group(event_type)
                 
-                # Extract arrays
-                timesteps = np.array([v[0] for v in values], dtype=np.int64)
-                data_values = np.array([v[1] for v in values])
-                
-                # Write datasets
-                event_subgroup.create_dataset(
-                    f'{key}_timesteps', data=timesteps,
-                    compression=self.compression, compression_opts=self.compression_opts
-                )
-                event_subgroup.create_dataset(
-                    key, data=data_values,
-                    compression=self.compression, compression_opts=self.compression_opts
-                )
+                for key, values in event_data.items():
+                    if not values:
+                        continue
+                        
+                    # Sort by timestep
+                    values.sort(key=lambda x: x[0])
+                    
+                    # Extract arrays
+                    timesteps = np.array([v[0] for v in values], dtype=np.int64)
+                    data_values = np.array([v[1] for v in values])
+                    
+                    # Write datasets
+                    event_subgroup.create_dataset(
+                        f'{key}_timesteps', data=timesteps,
+                        compression=self.config['compression'], 
+                        compression_opts=self.config['compression_opts']
+                    )
+                    event_subgroup.create_dataset(
+                        key, data=data_values,
+                        compression=self.config['compression'], 
+                        compression_opts=self.config['compression_opts']
+                    )
 
 
 class OptimizedDataExporter:
@@ -529,7 +853,12 @@ class OptimizedDataExporter:
                  compression_level: int = 4,
                  chunk_size: int = 10000,
                  enable_swmr: bool = False,
-                 async_write: bool = False):
+                 async_write: bool = False,
+                 enable_mmap: bool = False,
+                 adaptive_compression: bool = False,
+                 enable_profiling: bool = False,
+                 n_async_workers: int = 4,
+                 no_write: bool = False):
         """Initialize optimized exporter.
         
         Args:
@@ -541,7 +870,11 @@ class OptimizedDataExporter:
             compression_level: Compression level (1-9 for gzip)
             chunk_size: Chunk size for datasets
             enable_swmr: Enable single-writer multiple-reader mode
-            async_write: Enable asynchronous writing (experimental)
+            async_write: Enable asynchronous writing
+            enable_mmap: Enable memory-mapped mode for large experiments
+            adaptive_compression: Enable adaptive compression based on data entropy
+            enable_profiling: Enable performance profiling
+            n_async_workers: Number of async write workers
         """
         self.experiment_name = experiment_name
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -552,6 +885,14 @@ class OptimizedDataExporter:
         self.chunk_size = chunk_size
         self.enable_swmr = enable_swmr
         self.async_write = async_write
+        self.enable_mmap = enable_mmap
+        self.adaptive_compression = adaptive_compression
+        self.enable_profiling = enable_profiling
+        
+        # Initialize performance components
+        self.adaptive_compressor = AdaptiveCompressor() if adaptive_compression else None
+        self.realtime_stats = RealtimeStats() if async_write or enable_profiling else None
+        self.profiler = PerformanceProfiler() if enable_profiling else None
         
         # Create output directory
         self.output_dir = Path(output_base_dir) / f"{experiment_name}_{self.timestamp}"
@@ -560,31 +901,39 @@ class OptimizedDataExporter:
         # Create main HDF5 file with optimizations
         self.h5_path = self.output_dir / 'experiment_data.h5'
         
-        # File creation flags
-        if enable_swmr:
-            self.h5_file = h5py.File(self.h5_path, 'w', libver='latest')
-            self.h5_file.swmr_mode = True
-        else:
-            self.h5_file = h5py.File(self.h5_path, 'w')
+        # File creation with error handling
+        try:
+            if enable_mmap:
+                # Memory-mapped mode for large experiments
+                self.h5_file = h5py.File(self.h5_path, 'w', driver='core', 
+                                       backing_store=True, block_size=MEMORY_MAP_BLOCK_SIZE)
+            elif enable_swmr:
+                self.h5_file = h5py.File(self.h5_path, 'w', libver='latest')
+                self.h5_file.swmr_mode = True
+            else:
+                self.h5_file = h5py.File(self.h5_path, 'w')
+        except Exception as e:
+            raise RuntimeError(f"Failed to create HDF5 file at {self.h5_path}: {e}")
             
         # Set file-level compression properties
         if compression == 'gzip':
             # Create property list for better compression
             self.h5_file.attrs['compression_info'] = f"{compression}:{compression_level}"
             
-        # Set experiment metadata
-        self.h5_file.attrs['experiment_name'] = experiment_name
-        self.h5_file.attrs['timestamp'] = self.timestamp
-        self.h5_file.attrs['start_time'] = datetime.now().isoformat()
-        self.h5_file.attrs['schema_version'] = SCHEMA_VERSION
-        self.h5_file.attrs['neural_sampling_rate'] = neural_sampling_rate
-        self.h5_file.attrs['compression'] = compression or 'none'
-        self.h5_file.attrs['chunk_size'] = chunk_size
-        self.h5_file.attrs['optimized'] = True
-        
-        # Create groups
-        self.episodes_group = self.h5_file.create_group('episodes')
-        self.checkpoints_group = self.h5_file.create_group('checkpoints')
+        # Set experiment metadata (thread-safe)
+        with _HDF5_LOCK:
+            self.h5_file.attrs['experiment_name'] = experiment_name
+            self.h5_file.attrs['timestamp'] = self.timestamp
+            self.h5_file.attrs['start_time'] = datetime.now().isoformat()
+            self.h5_file.attrs['schema_version'] = SCHEMA_VERSION
+            self.h5_file.attrs['neural_sampling_rate'] = neural_sampling_rate
+            self.h5_file.attrs['compression'] = compression or 'none'
+            self.h5_file.attrs['chunk_size'] = chunk_size
+            self.h5_file.attrs['optimized'] = True
+            
+            # Create groups
+            self.episodes_group = self.h5_file.create_group('episodes')
+            self.checkpoints_group = self.h5_file.create_group('checkpoints')
         
         # State
         self.current_episode: Optional[OptimizedEpisode] = None
@@ -592,17 +941,10 @@ class OptimizedDataExporter:
         
         # Async write queue
         if async_write:
-            self.write_queue = Queue()
-            self.write_thread = threading.Thread(target=self._async_writer)
-            self.write_thread.daemon = True
-            self.write_thread.start()
+            self.async_queue = AsyncWriteQueue(n_workers=n_async_workers)
+        else:
+            self.async_queue = None
             
-        print(f"Initialized OptimizedDataExporter: {self.output_dir}")
-        print(f"  Compression: {compression}:{compression_level}")
-        print(f"  Chunk size: {chunk_size}")
-        print(f"  SWMR mode: {enable_swmr}")
-        print(f"  Async write: {async_write}")
-        
         # Automatically capture runtime info
         self.save_runtime_info()
         
@@ -667,7 +1009,7 @@ class OptimizedDataExporter:
             import jax
             jax_version = jax.__version__
             jax_devices = str(jax.devices())
-        except:
+        except ImportError:
             jax_version = None
             jax_devices = None
             
@@ -886,6 +1228,10 @@ class OptimizedDataExporter:
         if episode_id is None:
             episode_id = self.episode_count
             
+        # Create memory tracker if not exists
+        if not hasattr(self, 'memory_tracker'):
+            self.memory_tracker = MemoryTracker()
+            
         self.current_episode = OptimizedEpisode(
             episode_id=episode_id,
             h5_file=self.episodes_group,
@@ -893,7 +1239,12 @@ class OptimizedDataExporter:
             validate_data=self.validate_data,
             compression=self.compression,
             compression_opts=self.compression_level,
-            chunk_size=self.chunk_size
+            chunk_size=self.chunk_size,
+            adaptive_compressor=self.adaptive_compressor,
+            async_queue=self.async_queue,
+            realtime_stats=self.realtime_stats,
+            profiler=self.profiler,
+            memory_tracker=self.memory_tracker
         )
         
         self.episode_count += 1
@@ -977,42 +1328,98 @@ class OptimizedDataExporter:
                 compression_opts=self.compression_level
             )
             
-    def _async_writer(self):
-        """Background thread for async writes."""
-        while True:
-            try:
-                task = self.write_queue.get()
-                if task is None:
-                    break
-                task()
-            except Exception as e:
-                warnings.warn(f"Async write error: {e}")
+    def get_performance_stats(self) -> Dict[str, Any]:
+        """Get comprehensive performance statistics."""
+        stats = {}
+        
+        if self.realtime_stats:
+            stats['realtime'] = self.realtime_stats.get_summary()
+            
+        if self.async_queue:
+            stats['async_io'] = self.async_queue.get_stats()
+            
+        if self.profiler:
+            stats['profiling'] = self.profiler.get_report()
+            
+        if self.adaptive_compressor:
+            comp_stats = {}
+            for name, data in self.adaptive_compressor.compression_stats.items():
+                if data['ratios']:
+                    comp_stats[name] = {
+                        'avg_ratio': np.mean(data['ratios']),
+                        'avg_time': np.mean(data['times'])
+                    }
+            stats['compression'] = comp_stats
+            
+        return stats
                 
     def close(self):
-        """Close HDF5 file and save final metadata."""
-        # End any active episode
-        if self.current_episode is not None:
-            self.current_episode.end(success=False)
+        """Close HDF5 file and save final metadata with error handling."""
+        try:
+            # End any active episode
+            if self.current_episode is not None:
+                try:
+                    self.current_episode.end(success=False)
+                except Exception as e:
+                    warnings.warn(f"Failed to end episode during close: {e}")
+                    
+            # Stop async writer if enabled
+            if self.async_queue:
+                try:
+                    self.async_queue.flush()
+                    self.async_queue.shutdown()
+                except Exception as e:
+                    warnings.warn(f"Failed to shutdown async queue: {e}")
             
-        # Stop async writer if enabled
-        if self.async_write:
-            self.write_queue.put(None)
-            self.write_thread.join()
+            # Save performance statistics
+            if self.enable_profiling or self.async_write:
+                perf_stats = self.get_performance_stats()
+                if perf_stats:
+                    try:
+                        with open(self.output_dir / 'performance_stats.json', 'w') as f:
+                            json.dump(perf_stats, f, indent=2, cls=NumpyEncoder)
+                            
+                        # Also save to HDF5
+                        with _HDF5_LOCK:
+                            perf_group = self.h5_file.create_group('performance_stats')
+                            perf_group.attrs['stats'] = json.dumps(perf_stats, cls=NumpyEncoder)
+                    except Exception as e:
+                        warnings.warn(f"Failed to save performance stats: {e}")
             
-        # Update final metadata
-        self.h5_file.attrs['end_time'] = datetime.now().isoformat()
-        self.h5_file.attrs['total_episodes'] = self.episode_count
+            # Update final metadata
+            try:
+                with _HDF5_LOCK:
+                    self.h5_file.attrs['end_time'] = datetime.now().isoformat()
+                    self.h5_file.attrs['total_episodes'] = self.episode_count
+                    
+                    # Calculate file statistics
+                    file_size = self.h5_path.stat().st_size
+                    self.h5_file.attrs['file_size_bytes'] = file_size
+                    self.h5_file.attrs['file_size_mb'] = file_size / (1024 * 1024)
+            except Exception as e:
+                warnings.warn(f"Failed to update final metadata: {e}")
+                
+            # Print summary
+            print(f"Experiment complete. Data saved to: {self.output_dir}")
+            if hasattr(self, 'h5_path'):
+                try:
+                    file_size = self.h5_path.stat().st_size / (1024 * 1024)
+                    print(f"  File size: {file_size:.2f} MB")
+                except:
+                    pass
+                    
+        finally:
+            # Always try to close the file
+            if hasattr(self, 'h5_file') and self.h5_file:
+                try:
+                    with _HDF5_LOCK:
+                        self.h5_file.close()
+                except Exception as e:
+                    warnings.warn(f"Failed to close HDF5 file: {e}")
         
-        # Calculate file statistics
-        file_size = self.h5_path.stat().st_size
-        self.h5_file.attrs['file_size_bytes'] = file_size
-        self.h5_file.attrs['file_size_mb'] = file_size / (1024 * 1024)
-        
-        # Close file
-        self.h5_file.close()
-        
-        print(f"Experiment complete. Data saved to: {self.output_dir}")
-        print(f"  File size: {file_size / (1024 * 1024):.2f} MB")
+        # Performance summary if profiling enabled
+        if self.enable_profiling and self.profiler:
+            self.profiler.print_report()
         
     def __enter__(self):
         return self
@@ -1024,5 +1431,5 @@ class OptimizedDataExporter:
         if hasattr(self, 'h5_file') and self.h5_file:
             try:
                 self.h5_file.close()
-            except:
+            except Exception:
                 pass

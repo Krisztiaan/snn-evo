@@ -1,0 +1,13 @@
+{
+  "python_version": "3.12.7 | packaged by Anaconda, Inc. | (main, Oct  4 2024, 08:22:19) [Clang 14.0.6 ]",
+  "platform": "macOS-15.5-arm64-arm-64bit",
+  "hostname": "kmbp.local",
+  "numpy_version": "1.26.3",
+  "h5py_version": "3.10.0",
+  "jax_version": "0.6.1",
+  "jax_devices": "[CpuDevice(id=0)]",
+  "working_directory": "/Users/krisztiaan/dev/metalearning/models/phase_0_11",
+  "output_directory": "experiments/phase_0_11/snn_agent_phase11_optimized_20250607_114357",
+  "hdf5_driver": "sec2",
+  "hdf5_libver": "('earliest', 'v112')"
+}

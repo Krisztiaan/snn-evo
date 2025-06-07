@@ -1,252 +1,197 @@
-# keywords: [example, simple, usage, hdf5]
-"""Simple example of the HDF5-based data export system."""
+# keywords: [example, usage, demonstration, export]
+"""Example usage of the neural network data export module."""
 
 import numpy as np
-from export.exporter import DataExporter
-from export.loader import ExperimentLoader, quick_load
+from export import DataExporter, ExperimentLoader
 
 
-def simple_snn_experiment():
-    """Run a simple SNN experiment with data export."""
+def main():
+    """Demonstrate basic usage of the export module."""
     
-    # Create exporter - automatically uses HDF5
+    # Configuration
+    n_neurons = 1000
+    n_timesteps = 10000
+    n_episodes = 3
+    
+    print("=== Neural Network Data Export Example ===\n")
+    
+    # 1. Create an experiment and export data
+    print("1. Creating experiment and exporting data...")
+    
     with DataExporter(
-        experiment_name="simple_snn",
-        neural_sampling_rate=50,  # Save neural state every 50 timesteps
-        compression='gzip',       # Enable compression
-        compression_level=1       # Fast compression
+        experiment_name="example_experiment",
+        output_base_dir="./experiments",
+        neural_sampling_rate=100,  # Sample neural state every 100 timesteps
+        compression='gzip',
+        compression_level=4
     ) as exporter:
         
-        # Save configuration
+        # Save experiment configuration
         config = {
-            "n_neurons": 100,
-            "dt": 1.0,  # ms
-            "tau": 10.0,  # ms
-            "learning_rate": 0.01,
-            "grid_size": 1.0,
-            "reward_radius": 0.5,
-            "noise_amplitude": 2.0
+            "n_neurons": n_neurons,
+            "learning_rate": 0.001,
+            "algorithm": "STDP",
+            "network_type": "feedforward"
         }
         exporter.save_config(config)
+        print(f"   - Saved configuration")
         
-        # Save metadata
-        metadata = {
-            "description": "Simple SNN learning to navigate to reward",
-            "author": "Your Name",
-            "purpose": "Testing data export system",
-            "notes": "Uses simplified LIF neurons with STDP-like learning"
-        }
-        exporter.save_metadata(metadata)
-        
-        # Save code snapshot (this file)
-        import __main__
-        if hasattr(__main__, '__file__'):
-            exporter.save_code_snapshot([__main__.__file__])
-        
-        # Save git info if available
-        exporter.save_git_info()
-        
-        # Define network
-        n_neurons = config["n_neurons"]
+        # Save network structure
         neurons = {
             "neuron_ids": np.arange(n_neurons),
-            "neuron_types": np.array(["excitatory"] * 80 + ["inhibitory"] * 20),
-            "positions": np.random.rand(n_neurons, 2)
+            "neuron_types": np.random.choice([0, 1], n_neurons),  # 0: excitatory, 1: inhibitory
+            "positions": np.random.randn(n_neurons, 3)  # 3D positions
         }
         
-        # Random sparse connectivity
-        n_connections = 500
         connections = {
-            "source_ids": np.random.randint(0, n_neurons, n_connections),
-            "target_ids": np.random.randint(0, n_neurons, n_connections),
+            "source_ids": np.random.randint(0, n_neurons, 5000),
+            "target_ids": np.random.randint(0, n_neurons, 5000),
+            "delays": np.random.uniform(1, 10, 5000)
         }
         
-        # Initial weights
-        initial_weights = np.random.randn(n_connections) * 0.1
+        # Initial weight matrix (sparse)
+        initial_weights = np.random.randn(n_neurons, n_neurons) * 0.1
+        initial_weights[np.random.rand(n_neurons, n_neurons) > 0.1] = 0  # 90% sparse
         
         exporter.save_network_structure(neurons, connections, initial_weights)
+        print(f"   - Saved network structure ({n_neurons} neurons)")
         
-        # Run 3 episodes
-        for episode in range(3):
-            print(f"\nRunning episode {episode}")
+        # Run multiple episodes
+        for episode_id in range(n_episodes):
+            print(f"   - Recording episode {episode_id}...")
             
-            # Start episode
-            ep = exporter.start_episode()
-            
-            # Initialize state
-            v = np.random.randn(n_neurons) * 10 - 65  # Membrane potentials
-            weights = initial_weights.copy()
-            agent_pos = np.array([0.5, 0.5])
-            
-            # Run simulation
-            for t in range(1000):
-                # Simple neural dynamics
-                noise = np.random.randn(n_neurons) * 2
-                v += noise * config["dt"]
-                
-                # Spikes
-                spikes = v > -50
-                v[spikes] = -65  # Reset
-                
-                # Agent movement
-                agent_pos += np.random.randn(2) * 0.01
-                agent_pos = np.clip(agent_pos, 0, 1)
-                
-                # Reward (distance to center)
-                distance = np.linalg.norm(agent_pos - 0.5)
-                reward = 1.0 - distance if distance < 0.5 else 0
-                
-                # Log timestep data
-                exporter.log(
-                    timestep=t,
-                    neural_state={"membrane_potentials": v},
-                    spikes=spikes,
-                    behavior={"x": agent_pos[0], "y": agent_pos[1]},
-                    reward=reward
-                )
-                
-                # Occasional weight changes
-                if t % 100 == 0 and t > 0:
-                    # Pick random synapses to modify
-                    n_changes = np.random.poisson(5)
-                    for _ in range(n_changes):
-                        idx = np.random.randint(n_connections)
-                        old_w = weights[idx]
-                        new_w = old_w + np.random.randn() * 0.001
-                        weights[idx] = new_w
-                        
-                        exporter.log(
-                            timestep=t,
-                            synapse_id=idx,
-                            old_weight=old_w,
-                            new_weight=new_w
-                        )
-                        
-                # Log analysis event
-                if t == 500:
-                    exporter.log(
+            with exporter.start_episode(episode_id) as episode:
+                # Simulate episode data
+                for t in range(n_timesteps):
+                    # Neural state (sampled based on neural_sampling_rate)
+                    membrane_potential = np.random.randn(n_neurons) * 20 - 70  # mV
+                    
+                    # Spikes (sparse binary data)
+                    spike_prob = 0.01  # 1% spike rate
+                    spikes = np.random.binomial(1, spike_prob, n_neurons)
+                    
+                    # Behavior data
+                    position = np.array([
+                        10 * np.sin(t * 0.01),
+                        10 * np.cos(t * 0.01),
+                        0.1 * t
+                    ])
+                    velocity = np.array([0.1, 0.0, 0.1])
+                    
+                    # Reward (sparse)
+                    reward = 1.0 if t % 1000 == 0 else 0.0
+                    
+                    # Log timestep data
+                    episode.log_timestep(
                         timestep=t,
-                        event_type="midpoint_analysis",
-                        data={
-                            "mean_v": np.mean(v),
-                            "active_neurons": np.sum(np.abs(v + 65) > 5),
-                            "mean_weight": np.mean(weights)
-                        }
+                        neural_state={"membrane_potential": membrane_potential},
+                        spikes=spikes,
+                        behavior={
+                            "position": position,
+                            "velocity": velocity,
+                            "action": np.random.randint(4)  # discrete action
+                        },
+                        reward=reward
                     )
                     
-            # End episode
-            total_reward = ep.group.attrs.get('total_reward', 0)
-            exporter.end_episode(
-                success=total_reward > 50,
-                summary={"final_position": agent_pos.tolist()}
-            )
-            
-            print(f"Episode {episode} complete. Total reward: {total_reward:.2f}")
-            
-        # Save a checkpoint
-        exporter.save_checkpoint("final_weights", {"weights": weights})
+                    # Occasionally log weight changes (plasticity)
+                    if t % 500 == 0 and t > 0:
+                        for _ in range(10):
+                            src, tgt = np.random.randint(0, n_neurons, 2)
+                            old_w = np.random.randn() * 0.1
+                            new_w = old_w + np.random.randn() * 0.01
+                            
+                            episode.log_weight_change(
+                                timestep=t,
+                                synapse_id=(src, tgt),
+                                old_weight=old_w,
+                                new_weight=new_w,
+                                learning_rule="STDP"
+                            )
+                
+                # Log custom event
+                if episode_id == 0:
+                    episode.log_event("phase_transition", n_timesteps // 2, {
+                        "from_phase": "exploration",
+                        "to_phase": "exploitation",
+                        "confidence": 0.85
+                    })
     
-    print(f"\nExperiment saved to: {exporter.output_dir}")
-    return exporter.output_dir
-
-
-def analyze_experiment(experiment_dir):
-    """Load and analyze the experiment data."""
-    print(f"\n{'='*60}")
-    print("LOADING AND ANALYZING DATA")
-    print('='*60)
+    print(f"\n   Experiment complete!")
     
-    # Method 1: Using ExperimentLoader for detailed access
-    with ExperimentLoader(experiment_dir) as loader:
-        # Get experiment info
+    # 2. Load and analyze the data
+    print("\n2. Loading and analyzing exported data...\n")
+    
+    # Find the experiment directory (most recent)
+    from pathlib import Path
+    exp_dirs = list(Path("./experiments").glob("example_experiment_*"))
+    if not exp_dirs:
+        print("   No experiment found!")
+        return
+    
+    exp_dir = sorted(exp_dirs)[-1]  # Most recent
+    
+    with ExperimentLoader(exp_dir) as loader:
+        # Get metadata
         metadata = loader.get_metadata()
-        print(f"\nExperiment: {metadata['experiment_name']}")
-        print(f"Started: {metadata['start_time']}")
-        print(f"Episodes: {metadata['episode_count']}")
+        print(f"   Experiment: {metadata['experiment_name']}")
+        print(f"   Created: {metadata['start_time']}")
+        print(f"   Episodes: {metadata['episode_count']}")
         
-        # Get user metadata
-        if 'description' in metadata:
-            print(f"\nDescription: {metadata['description']}")
-            print(f"Author: {metadata.get('author', 'Unknown')}")
-            
         # Get configuration
         config = loader.get_config()
-        print(f"\nConfiguration:")
-        for key, value in sorted(config.items()):
-            print(f"  {key}: {value}")
-            
-        # Get runtime info
-        runtime = loader.get_runtime_info()
-        if runtime:
-            print(f"\nRuntime Environment:")
-            print(f"  Python: {runtime.get('python_version', 'Unknown').split()[0]}")
-            print(f"  Platform: {runtime.get('platform', 'Unknown')}")
-            if 'jax_version' in runtime:
-                print(f"  JAX: {runtime['jax_version']}")
-                
-        # Get git info
-        git_info = loader.get_git_info()
-        if git_info:
-            print(f"\nGit Info:")
-            print(f"  Branch: {git_info.get('branch', 'Unknown')}")
-            print(f"  Commit: {git_info.get('commit_hash', 'Unknown')[:8]}")
-            print(f"  Clean: {'Yes' if not git_info.get('dirty', True) else 'No'}")
+        print(f"\n   Configuration:")
+        for key, value in config.items():
+            print(f"     - {key}: {value}")
         
-        # Get episode summaries
-        summaries = loader.get_all_summaries()
-        print(f"\nEpisode Summary:")
-        print(f"{'Episode':<10} {'Timesteps':<12} {'Reward':<12} {'Success':<8}")
-        print("-" * 45)
-        for summary in summaries:
-            print(f"{summary['episode_id']:<10} "
-                  f"{summary.get('total_timesteps', 0):<12} "
-                  f"{summary.get('total_reward', 0):<12.2f} "
-                  f"{summary.get('success', False)!s:<8}")
+        # List episodes
+        episodes = loader.list_episodes()
+        print(f"\n   Found {len(episodes)} episodes: {episodes}")
         
-        # Analyze first episode in detail
-        episode = loader.get_episode(0)
+        # Load first episode
+        print(f"\n   Loading episode 0...")
+        episode_data = loader.get_episode(0)
         
-        # Get neural states (just first 10 samples)
-        neural_states = episode.get_neural_states(stop=10)
-        if neural_states:
-            print(f"\nNeural states shape: {neural_states['membrane_potentials'].shape}")
-            print(f"Mean potential: {neural_states['membrane_potentials'].mean():.2f} mV")
+        # Get neural states
+        neural_states = episode_data.get_neural_states()
+        print(f"     - Neural states: {neural_states['timesteps'].shape[0]} samples")
+        print(f"       Mean membrane potential: {neural_states['membrane_potential'].mean():.2f} mV")
         
         # Get spikes
-        spikes = episode.get_spikes()
+        spikes = episode_data.get_spikes()
         if spikes:
-            print(f"\nTotal spikes: {len(spikes['timesteps'])}")
-            unique_neurons = np.unique(spikes['neuron_ids'])
-            print(f"Active neurons: {len(unique_neurons)}/{metadata['n_neurons']}")
+            print(f"     - Spikes: {len(spikes['timesteps'])} total spikes")
+            spike_rate = len(spikes['timesteps']) / (n_timesteps * n_neurons)
+            print(f"       Average spike rate: {spike_rate*1000:.2f} Hz")
         
         # Get behavior
-        behavior = episode.get_behavior()
-        if behavior:
-            print(f"\nBehavior samples: {len(behavior['timesteps'])}")
-            print(f"Final position: ({behavior['x'][-1]:.3f}, {behavior['y'][-1]:.3f})")
+        behavior = episode_data.get_behavior()
+        print(f"     - Behavior: {len(behavior['timesteps'])} timesteps")
+        final_pos = behavior['position'][-1]
+        print(f"       Final position: ({final_pos[0]:.2f}, {final_pos[1]:.2f}, {final_pos[2]:.2f})")
         
-        # Get custom events
-        events = episode.get_events()
-        if 'midpoint_analysis' in events:
-            midpoint = events['midpoint_analysis']
-            print(f"\nMidpoint analysis:")
-            print(f"  Mean V: {midpoint['mean_v'][0]:.2f} mV")
-            print(f"  Active neurons: {midpoint['active_neurons'][0]}")
+        # Get rewards
+        rewards = episode_data.get_rewards()
+        if rewards:
+            print(f"     - Rewards: {len(rewards['timesteps'])} non-zero rewards")
+            print(f"       Total reward: {np.sum(rewards['values']):.2f}")
+        
+        # Get weight changes
+        weight_changes = episode_data.get_weight_changes()
+        if weight_changes and 'timesteps' in weight_changes:
+            print(f"     - Weight changes: {len(weight_changes['timesteps'])} changes")
+            mean_delta = np.mean(weight_changes['deltas'])
+            print(f"       Mean weight change: {mean_delta:.6f}")
+            
+        # Get metadata
+        episode_meta = episode_data.get_metadata()
+        print(f"\n   Episode summary:")
+        print(f"     - Duration: {episode_meta['total_timesteps']} timesteps")
+        print(f"     - Total spikes: {episode_meta.get('total_spikes', 0)}")
+        print(f"     - Total reward: {episode_meta.get('total_reward', 0)}")
     
-    # Method 2: Quick load for simple access
-    print(f"\n{'='*60}")
-    print("QUICK LOAD EXAMPLE")
-    print('='*60)
-    
-    data = quick_load(experiment_dir, episode_id=0)
-    print(f"\nQuick load keys: {list(data.keys())}")
-    print(f"Episode keys: {list(data['episode'].keys())}")
-    print(f"First 5 spike events: {data['episode']['spikes'][:5]}")
+    print("\n=== Example completed successfully! ===")
 
 
 if __name__ == "__main__":
-    # Run experiment
-    output_dir = simple_snn_experiment()
-    
-    # Analyze results
-    analyze_experiment(output_dir)
+    main()
