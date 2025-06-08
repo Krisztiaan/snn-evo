@@ -1,11 +1,12 @@
 # keywords: [test, pytest, integration, export, hdf5, loader]
 """Comprehensive integration tests for the DataExporter module."""
 
-import pytest
-import numpy as np
-import tempfile
 import shutil
+import tempfile
 from pathlib import Path
+
+import numpy as np
+import pytest
 
 from export import DataExporter, ExperimentLoader
 

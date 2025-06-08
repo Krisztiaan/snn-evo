@@ -11,46 +11,49 @@ Key improvements over 0.9:
 5. Optional weight consolidation
 """
 
-from typing import Dict, Any, NamedTuple, Tuple, Optional
+from functools import partial
+from typing import Any, Dict, NamedTuple, Tuple
+
 import jax
 import jax.numpy as jnp
-from jax import random, jit
 import numpy as np
-from functools import partial
+from jax import jit, random
 
-from .config import SnnAgentConfig, NetworkParams
-from world.simple_grid_0001 import SimpleGridWorld, WorldState, Observation
 from export import DataExporter
+from world.simple_grid_0001 import SimpleGridWorld
+
 from .agent_vectorized import create_connectivity_vectorized
+from .config import NetworkParams, SnnAgentConfig
 
 
 class AgentState(NamedTuple):
     """Complete agent state with all necessary components."""
+
     # Core dynamics
-    v: jnp.ndarray              # Membrane potentials
-    spike: jnp.ndarray          # Current spikes
-    refractory: jnp.ndarray     # Refractory counters
+    v: jnp.ndarray  # Membrane potentials
+    spike: jnp.ndarray  # Current spikes
+    refractory: jnp.ndarray  # Refractory counters
 
     # Synaptic currents (separate E/I for biological realism)
     syn_current_e: jnp.ndarray  # Excitatory currents
     syn_current_i: jnp.ndarray  # Inhibitory currents
 
     # Synaptic traces (two timescales for richer STDP)
-    trace_fast: jnp.ndarray     # Fast trace (~20ms)
-    trace_slow: jnp.ndarray     # Slow trace (~100ms)
+    trace_fast: jnp.ndarray  # Fast trace (~20ms)
+    trace_slow: jnp.ndarray  # Slow trace (~100ms)
 
     # Homeostasis
-    firing_rate: jnp.ndarray    # Running average firing rate
+    firing_rate: jnp.ndarray  # Running average firing rate
     threshold_adapt: jnp.ndarray  # Adaptive threshold modulation
 
     # Learning
     eligibility_trace: jnp.ndarray  # Synaptic eligibility
-    dopamine: float             # Neuromodulator level
-    value_estimate: float       # Predicted future reward
+    dopamine: float  # Neuromodulator level
+    value_estimate: float  # Predicted future reward
 
     # Weights and connectivity
-    w: jnp.ndarray             # All synaptic weights
-    w_mask: jnp.ndarray        # Connection existence mask
+    w: jnp.ndarray  # All synaptic weights
+    w_mask: jnp.ndarray  # Connection existence mask
     w_plastic_mask: jnp.ndarray  # Which weights can learn
 
     # Population identity
@@ -58,17 +61,18 @@ class AgentState(NamedTuple):
     neuron_types: jnp.ndarray  # 0=sensory, 1=processing, 2=readout
 
     # Motor output
-    motor_trace: jnp.ndarray   # Integrated motor command
+    motor_trace: jnp.ndarray  # Integrated motor command
 
     # Input representation
     input_channels: jnp.ndarray  # Current population-coded input
 
     # Multi-episode learning
     weight_momentum: jnp.ndarray  # Momentum for weight updates
-    episodes_completed: int       # Track number of episodes for adaptive learning
+    episodes_completed: int  # Track number of episodes for adaptive learning
 
 
 # === HELPER FUNCTIONS ===
+
 
 @jit
 def _apply_dale_principle(w: jnp.ndarray, is_excitatory: jnp.ndarray) -> jnp.ndarray:
@@ -78,25 +82,27 @@ def _apply_dale_principle(w: jnp.ndarray, is_excitatory: jnp.ndarray) -> jnp.nda
     return jnp.where(E_mask, jnp.abs(w), -jnp.abs(w))
 
 
-@partial(jit, static_argnames=['params'])
+@partial(jit, static_argnames=["params"])
 def _get_adaptive_learning_rate(episodes_completed: int, params: NetworkParams) -> float:
     """Compute learning rate that adapts across episodes."""
     decay_rate = params.LEARNING_RATE_DECAY
     min_rate = params.MIN_LEARNING_RATE
-    adaptive_rate = params.BASE_LEARNING_RATE * \
-        (decay_rate ** episodes_completed)
+    adaptive_rate = params.BASE_LEARNING_RATE * (decay_rate**episodes_completed)
     return jnp.maximum(adaptive_rate, min_rate)
 
 
-@partial(jit, static_argnames=['params'])
-def _encode_gradient_population(gradient: float, params: NetworkParams, key: random.PRNGKey) -> jnp.ndarray:
+@partial(jit, static_argnames=["params"])
+def _encode_gradient_population(
+    gradient: float, params: NetworkParams, key: random.PRNGKey
+) -> jnp.ndarray:
     """Convert scalar gradient to population code with tuned neurons."""
     # Each channel has a preferred gradient value
     preferred_values = jnp.linspace(0, 1, params.NUM_INPUT_CHANNELS)
 
     # Gaussian tuning curves
-    activations = jnp.exp(-(gradient - preferred_values)
-                          ** 2 / (2 * params.INPUT_TUNING_WIDTH**2))
+    activations = jnp.exp(
+        -((gradient - preferred_values) ** 2) / (2 * params.INPUT_TUNING_WIDTH**2)
+    )
 
     # Add small noise for robustness
     noise = random.normal(key, activations.shape) * 0.05
@@ -111,9 +117,14 @@ def _encode_gradient_population(gradient: float, params: NetworkParams, key: ran
 
 # === NETWORK INITIALIZATION ===
 
-def _create_connectivity(key: random.PRNGKey, params: NetworkParams,
-                         num_neurons: int, is_excitatory: jnp.ndarray,
-                         neuron_types: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
+
+def _create_connectivity(
+    key: random.PRNGKey,
+    params: NetworkParams,
+    num_neurons: int,
+    is_excitatory: jnp.ndarray,
+    neuron_types: jnp.ndarray,
+) -> Tuple[jnp.ndarray, jnp.ndarray]:
     """
     Create biologically motivated connectivity patterns.
     Returns: (connection_mask, plastic_mask)
@@ -142,8 +153,7 @@ def _create_connectivity(key: random.PRNGKey, params: NetworkParams,
     # 1. Input → Sensory connections (fixed, non-plastic)
     sensory_indices = jnp.where(is_sensory)[0]
     if len(sensory_indices) > 0:
-        input_mask = random.uniform(
-            keys[0], (len(sensory_indices), n_in)) < params.P_INPUT_SENSORY
+        input_mask = random.uniform(keys[0], (len(sensory_indices), n_in)) < params.P_INPUT_SENSORY
         for i, idx in enumerate(sensory_indices):
             w_mask = w_mask.at[idx, :n_in].set(input_mask[i])
             if params.LEARN_INPUT_CONNECTIONS:
@@ -163,8 +173,7 @@ def _create_connectivity(key: random.PRNGKey, params: NetworkParams,
     if len(proc_indices) > 0:
         # Create distance matrix for local connectivity bias
         proc_positions = jnp.arange(len(proc_indices))
-        dist_matrix = jnp.abs(
-            proc_positions[:, None] - proc_positions[None, :])
+        dist_matrix = jnp.abs(proc_positions[:, None] - proc_positions[None, :])
         dist_matrix = jnp.minimum(dist_matrix, len(proc_indices) - dist_matrix)
         is_local = dist_matrix < (len(proc_indices) * params.LOCAL_RADIUS)
 
@@ -179,8 +188,11 @@ def _create_connectivity(key: random.PRNGKey, params: NetworkParams,
 
                 # Determine connection probability based on types
                 if proc_e_mask[i_idx] and proc_e_mask[j_idx]:  # E→E
-                    p = params.P_PROC_PROC_LOCAL if is_local[i_idx,
-                                                             j_idx] else params.P_PROC_PROC_DIST
+                    p = (
+                        params.P_PROC_PROC_LOCAL
+                        if is_local[i_idx, j_idx]
+                        else params.P_PROC_PROC_DIST
+                    )
                 elif proc_e_mask[i_idx] and not proc_e_mask[j_idx]:  # E→I
                     p = params.P_EI
                 elif not proc_e_mask[i_idx] and proc_e_mask[j_idx]:  # I→E
@@ -208,9 +220,13 @@ def _create_connectivity(key: random.PRNGKey, params: NetworkParams,
     return w_mask, w_plastic
 
 
-def _initialize_weights(key: random.PRNGKey, params: NetworkParams,
-                        w_mask: jnp.ndarray, is_excitatory: jnp.ndarray,
-                        neuron_types: jnp.ndarray) -> jnp.ndarray:
+def _initialize_weights(
+    key: random.PRNGKey,
+    params: NetworkParams,
+    w_mask: jnp.ndarray,
+    is_excitatory: jnp.ndarray,
+    neuron_types: jnp.ndarray,
+) -> jnp.ndarray:
     """Initialize weights with appropriate distributions for each connection type."""
     n = len(neuron_types)
     n_in = params.NUM_INPUT_CHANNELS
@@ -225,10 +241,8 @@ def _initialize_weights(key: random.PRNGKey, params: NetworkParams,
     keys = random.split(key, 5)
 
     # 1. Input → Sensory weights
-    input_weights = sample_weights(
-        keys[0], (n, n_in), params.W_INPUT_SENSORY, params.W_INIT_SCALE)
-    w = w.at[:, :n_in].set(
-        jnp.where(w_mask[:, :n_in], jnp.abs(input_weights), 0))
+    input_weights = sample_weights(keys[0], (n, n_in), params.W_INPUT_SENSORY, params.W_INIT_SCALE)
+    w = w.at[:, :n_in].set(jnp.where(w_mask[:, :n_in], jnp.abs(input_weights), 0))
 
     # 2. Sensory → Processing weights
     sens_indices = jnp.where(neuron_types == 0)[0]
@@ -237,8 +251,10 @@ def _initialize_weights(key: random.PRNGKey, params: NetworkParams,
     for i, sens_idx in enumerate(sens_indices):
         for j, proc_idx in enumerate(proc_indices):
             if w_mask[proc_idx, n_in + sens_idx]:
-                w_val = jnp.abs(random.normal(
-                    keys[1], ()) * params.W_SENSORY_PROC * params.W_INIT_SCALE + params.W_SENSORY_PROC)
+                w_val = jnp.abs(
+                    random.normal(keys[1], ()) * params.W_SENSORY_PROC * params.W_INIT_SCALE
+                    + params.W_SENSORY_PROC
+                )
                 w = w.at[proc_idx, n_in + sens_idx].set(w_val)
 
     # 3. Processing ↔ Processing weights
@@ -255,8 +271,7 @@ def _initialize_weights(key: random.PRNGKey, params: NetworkParams,
                 else:  # I→I
                     mean = params.W_II
 
-                w_val = random.normal(keys[2], ()) * \
-                    (mean * params.W_INIT_SCALE) + mean
+                w_val = random.normal(keys[2], ()) * (mean * params.W_INIT_SCALE) + mean
                 w = w.at[tgt_idx, n_in + src_idx].set(jnp.abs(w_val))
 
     # 4. Processing → Readout weights
@@ -265,8 +280,10 @@ def _initialize_weights(key: random.PRNGKey, params: NetworkParams,
         if is_excitatory[src_idx]:  # Only E neurons
             for j, tgt_idx in enumerate(readout_indices):
                 if w_mask[tgt_idx, n_in + src_idx]:
-                    w_val = jnp.abs(random.normal(
-                        keys[3], ()) * params.W_PROC_READOUT * params.W_INIT_SCALE + params.W_PROC_READOUT)
+                    w_val = jnp.abs(
+                        random.normal(keys[3], ()) * params.W_PROC_READOUT * params.W_INIT_SCALE
+                        + params.W_PROC_READOUT
+                    )
                     w = w.at[tgt_idx, n_in + src_idx].set(w_val)
 
     # Apply Dale's principle to neural weights (not input weights)
@@ -279,7 +296,8 @@ def _initialize_weights(key: random.PRNGKey, params: NetworkParams,
 
 # === NEURAL DYNAMICS ===
 
-@partial(jit, static_argnames=['params'])
+
+@partial(jit, static_argnames=["params"])
 def _neuron_step(state: AgentState, params: NetworkParams, key: random.PRNGKey) -> AgentState:
     """
     Core neural dynamics with separate E/I currents and homeostasis.
@@ -294,8 +312,7 @@ def _neuron_step(state: AgentState, params: NetworkParams, key: random.PRNGKey) 
     # Compute synaptic input
     # First, concatenate input channels with neural spikes
     n_in = params.NUM_INPUT_CHANNELS
-    all_activity = jnp.concatenate(
-        [state.input_channels, state.spike.astype(float)])
+    all_activity = jnp.concatenate([state.input_channels, state.spike.astype(float)])
 
     # Compute weighted input
     syn_input = state.w @ all_activity
@@ -324,26 +341,22 @@ def _neuron_step(state: AgentState, params: NetworkParams, key: random.PRNGKey) 
 
     # Reset and refractory
     v_new = jnp.where(spike_new, params.V_RESET, v_new)
-    refractory_new = jnp.where(
-        spike_new, params.REFRACTORY_TIME, refractory_new)
+    refractory_new = jnp.where(spike_new, params.REFRACTORY_TIME, refractory_new)
 
     # Update synaptic traces (two timescales)
-    trace_fast_new = state.trace_fast * \
-        jnp.exp(-1.0 / params.TAU_TRACE_FAST) + spike_new
-    trace_slow_new = state.trace_slow * \
-        jnp.exp(-1.0 / params.TAU_TRACE_SLOW) + spike_new * 0.5
+    trace_fast_new = state.trace_fast * jnp.exp(-1.0 / params.TAU_TRACE_FAST) + spike_new
+    trace_slow_new = state.trace_slow * jnp.exp(-1.0 / params.TAU_TRACE_SLOW) + spike_new * 0.5
 
     # Update firing rate estimate
     alpha = 1.0 / params.HOMEOSTATIC_TAU
-    firing_rate_new = state.firing_rate * \
-        (1 - alpha) + spike_new.astype(float) * 1000.0 * alpha
+    firing_rate_new = state.firing_rate * (1 - alpha) + spike_new.astype(float) * 1000.0 * alpha
 
     # Update threshold adaptation
     rate_error = firing_rate_new - params.TARGET_RATE_HZ
-    threshold_adapt_new = state.threshold_adapt + \
-        params.THRESHOLD_ADAPT_RATE * rate_error
+    threshold_adapt_new = state.threshold_adapt + params.THRESHOLD_ADAPT_RATE * rate_error
     threshold_adapt_new = jnp.clip(
-        threshold_adapt_new, -params.MAX_THRESHOLD_ADAPT, params.MAX_THRESHOLD_ADAPT)
+        threshold_adapt_new, -params.MAX_THRESHOLD_ADAPT, params.MAX_THRESHOLD_ADAPT
+    )
 
     return state._replace(
         v=v_new,
@@ -354,13 +367,14 @@ def _neuron_step(state: AgentState, params: NetworkParams, key: random.PRNGKey) 
         trace_fast=trace_fast_new,
         trace_slow=trace_slow_new,
         firing_rate=firing_rate_new,
-        threshold_adapt=threshold_adapt_new
+        threshold_adapt=threshold_adapt_new,
     )
 
 
 # === LEARNING ===
 
-@partial(jit, static_argnames=['params'])
+
+@partial(jit, static_argnames=["params"])
 def _compute_eligibility_trace(state: AgentState, params: NetworkParams) -> jnp.ndarray:
     """
     Compute STDP-based eligibility traces using both fast and slow traces.
@@ -368,16 +382,14 @@ def _compute_eligibility_trace(state: AgentState, params: NetworkParams) -> jnp.
     """
     # Standard STDP using fast trace
     # Pre-synaptic trace at post-synaptic spike time
-    pre_trace = jnp.concatenate(
-        [jnp.zeros(params.NUM_INPUT_CHANNELS), state.trace_fast])
+    pre_trace = jnp.concatenate([jnp.zeros(params.NUM_INPUT_CHANNELS), state.trace_fast])
     post_spike = state.spike.astype(float)
 
     # LTP: pre trace × post spike
     ltp = pre_trace[None, :] * post_spike[:, None]
 
     # LTD: pre spike × post trace
-    pre_spike = jnp.concatenate(
-        [jnp.zeros(params.NUM_INPUT_CHANNELS), state.spike.astype(float)])
+    pre_spike = jnp.concatenate([jnp.zeros(params.NUM_INPUT_CHANNELS), state.spike.astype(float)])
     post_trace = state.trace_fast
     ltd = pre_spike[None, :] * post_trace[:, None]
 
@@ -394,14 +406,15 @@ def _compute_eligibility_trace(state: AgentState, params: NetworkParams) -> jnp.
     return new_eligibility
 
 
-@partial(jit, static_argnames=['params'])
-def _three_factor_learning(state: AgentState, reward: float, gradient: float, params: NetworkParams) -> AgentState:
+@partial(jit, static_argnames=["params"])
+def _three_factor_learning(
+    state: AgentState, reward: float, gradient: float, params: NetworkParams
+) -> AgentState:
     """
     Three-factor learning rule with gradient-proportional dopamine modulation and momentum.
     """
     # 1. Compute reward prediction error
-    td_error = reward + params.REWARD_DISCOUNT * \
-        state.value_estimate - state.value_estimate
+    td_error = reward + params.REWARD_DISCOUNT * state.value_estimate - state.value_estimate
     new_value = state.value_estimate + params.REWARD_PREDICTION_RATE * td_error
 
     # 2. Update dopamine based on RPE + gradient bonus
@@ -410,13 +423,13 @@ def _three_factor_learning(state: AgentState, reward: float, gradient: float, pa
     total_reward_signal = td_error * 0.5 + gradient_reward
 
     decay = jnp.exp(-1.0 / params.TAU_DOPAMINE)
-    dopamine_response = state.dopamine * decay + \
-        params.BASELINE_DOPAMINE * (1 - decay) + total_reward_signal
+    dopamine_response = (
+        state.dopamine * decay + params.BASELINE_DOPAMINE * (1 - decay) + total_reward_signal
+    )
     new_dopamine = jnp.clip(dopamine_response, 0.0, 2.0)
 
     # 3. Compute dopamine modulation factor
-    da_factor = (new_dopamine - params.BASELINE_DOPAMINE) / \
-        (params.BASELINE_DOPAMINE + 1e-8)
+    da_factor = (new_dopamine - params.BASELINE_DOPAMINE) / (params.BASELINE_DOPAMINE + 1e-8)
     modulation = jax.nn.tanh(da_factor * 2.0)  # Smooth, bounded modulation
 
     # 4. Update eligibility traces
@@ -430,8 +443,7 @@ def _three_factor_learning(state: AgentState, reward: float, gradient: float, pa
 
     # Apply momentum
     momentum_decay = params.WEIGHT_MOMENTUM_DECAY
-    new_momentum = state.weight_momentum * \
-        momentum_decay + dw * (1 - momentum_decay)
+    new_momentum = state.weight_momentum * momentum_decay + dw * (1 - momentum_decay)
 
     # Add weight decay
     weight_penalty = params.WEIGHT_DECAY * state.w * state.w_plastic_mask
@@ -456,8 +468,7 @@ def _three_factor_learning(state: AgentState, reward: float, gradient: float, pa
 
     # Ensure Dale's principle is maintained for neural connections
     # Apply Dale's principle correctly based on pre-synaptic neurons
-    w_neural_dale = _apply_dale_principle(
-        w_neural_bounded, state.is_excitatory)
+    w_neural_dale = _apply_dale_principle(w_neural_bounded, state.is_excitatory)
     w_new = w_new.at[:, n_in:].set(w_neural_dale)
 
     # Zero out non-existent connections
@@ -468,12 +479,14 @@ def _three_factor_learning(state: AgentState, reward: float, gradient: float, pa
         weight_momentum=new_momentum,
         eligibility_trace=new_eligibility * 0.9,  # Decay after use
         dopamine=new_dopamine,
-        value_estimate=new_value
+        value_estimate=new_value,
     )
 
 
-@partial(jit, static_argnames=['params', 'soft_reset'])
-def _reset_episode_state(state: AgentState, params: NetworkParams, soft_reset: bool = True) -> AgentState:
+@partial(jit, static_argnames=["params", "soft_reset"])
+def _reset_episode_state(
+    state: AgentState, params: NetworkParams, soft_reset: bool = True
+) -> AgentState:
     """
     Reset state for new episode while preserving weights and some homeostatic information.
 
@@ -491,35 +504,28 @@ def _reset_episode_state(state: AgentState, params: NetworkParams, soft_reset: b
             v=jnp.full(n_total, params.V_REST),
             spike=jnp.zeros(n_total, dtype=bool),
             refractory=jnp.zeros(n_total),
-
             # Synaptic state - reset completely
             syn_current_e=jnp.zeros(n_total),
             syn_current_i=jnp.zeros(n_total),
             trace_fast=jnp.zeros(n_total),
             trace_slow=jnp.zeros(n_total),
-
             # Homeostasis - partial preservation
             firing_rate=state.firing_rate * 0.9 + params.TARGET_RATE_HZ * 0.1,
             threshold_adapt=state.threshold_adapt * 0.9,
-
             # Learning - partial preservation
             eligibility_trace=jnp.zeros_like(state.eligibility_trace),
             dopamine=state.dopamine * 0.8 + params.BASELINE_DOPAMINE * 0.2,
             value_estimate=state.value_estimate * 0.5,
-
             # Weights preserved
             # w, w_mask, w_plastic_mask unchanged
-
             # Identity preserved
             # is_excitatory, neuron_types unchanged
-
             # I/O - reset
             motor_trace=jnp.zeros(4),
             input_channels=jnp.zeros(params.NUM_INPUT_CHANNELS),
-
             # Multi-episode learning - increment episode counter
             # weight_momentum preserved
-            episodes_completed=state.episodes_completed + 1
+            episodes_completed=state.episodes_completed + 1,
         )
     else:
         # Hard reset - only preserve weights and structure
@@ -538,11 +544,11 @@ def _reset_episode_state(state: AgentState, params: NetworkParams, soft_reset: b
             value_estimate=0.0,
             motor_trace=jnp.zeros(4),
             input_channels=jnp.zeros(params.NUM_INPUT_CHANNELS),
-            episodes_completed=state.episodes_completed + 1
+            episodes_completed=state.episodes_completed + 1,
         )
 
 
-@partial(jit, static_argnames=['params'])
+@partial(jit, static_argnames=["params"])
 def _consolidate_weights(state: AgentState, params: NetworkParams) -> AgentState:
     """
     Optional weight consolidation between episodes to maintain stability.
@@ -561,15 +567,13 @@ def _consolidate_weights(state: AgentState, params: NetworkParams) -> AgentState
     if w_mean > 0:
         scale_factor = target_mean / w_mean
         # Soft scaling to avoid abrupt changes
-        scale_factor = 1.0 + (scale_factor - 1.0) * \
-            params.WEIGHT_CONSOLIDATION_RATE
+        scale_factor = 1.0 + (scale_factor - 1.0) * params.WEIGHT_CONSOLIDATION_RATE
 
         # Scale neural weights
         w_neural_scaled = w_neural * scale_factor
 
         # Apply Dale's principle
-        w_neural_scaled = _apply_dale_principle(
-            w_neural_scaled, state.is_excitatory)
+        w_neural_scaled = _apply_dale_principle(w_neural_scaled, state.is_excitatory)
 
         # Update weights
         w_new = state.w.at[:, n_in:].set(w_neural_scaled)
@@ -582,8 +586,11 @@ def _consolidate_weights(state: AgentState, params: NetworkParams) -> AgentState
 
 # === ACTION SELECTION ===
 
-@partial(jit, static_argnames=['params'])
-def _decode_action(state: AgentState, params: NetworkParams, key: random.PRNGKey) -> Tuple[int, jnp.ndarray]:
+
+@partial(jit, static_argnames=["params"])
+def _decode_action(
+    state: AgentState, params: NetworkParams, key: random.PRNGKey
+) -> Tuple[int, jnp.ndarray]:
     """
     Decode action from readout population activity.
     """
@@ -603,8 +610,7 @@ def _decode_action(state: AgentState, params: NetworkParams, key: random.PRNGKey
     for i in range(4):
         start_idx = params.NUM_SENSORY + params.NUM_PROCESSING + i * n_per_action
         end_idx = start_idx + n_per_action
-        motor_input = motor_input.at[i].set(
-            jnp.sum(readout_spikes[start_idx:end_idx]))
+        motor_input = motor_input.at[i].set(jnp.sum(readout_spikes[start_idx:end_idx]))
 
     # Update motor trace
     motor_trace_new = state.motor_trace * decay + motor_input
@@ -621,6 +627,7 @@ def _decode_action(state: AgentState, params: NetworkParams, key: random.PRNGKey
 
 # === MAIN AGENT CLASS ===
 
+
 class SnnAgent:
     """Phase 0.10 SNN Agent with multi-episode learning capabilities."""
 
@@ -631,9 +638,9 @@ class SnnAgent:
 
         print("Initializing network state...")
         import time
+
         start_time = time.time()
-        self.state: AgentState = self._initialize_state(
-            random.PRNGKey(config.exp_config.seed))
+        self.state: AgentState = self._initialize_state(random.PRNGKey(config.exp_config.seed))
         print(f"Network initialized in {time.time() - start_time:.2f}s")
 
         # Monitoring
@@ -646,11 +653,13 @@ class SnnAgent:
         n_total = p.NUM_SENSORY + p.NUM_PROCESSING + p.NUM_READOUT
 
         # Assign neuron types
-        neuron_types = jnp.concatenate([
-            jnp.zeros(p.NUM_SENSORY, dtype=int),      # Type 0: sensory
-            jnp.ones(p.NUM_PROCESSING, dtype=int),     # Type 1: processing
-            jnp.full(p.NUM_READOUT, 2, dtype=int)      # Type 2: readout
-        ])
+        neuron_types = jnp.concatenate(
+            [
+                jnp.zeros(p.NUM_SENSORY, dtype=int),  # Type 0: sensory
+                jnp.ones(p.NUM_PROCESSING, dtype=int),  # Type 1: processing
+                jnp.full(p.NUM_READOUT, 2, dtype=int),  # Type 2: readout
+            ]
+        )
 
         # Assign E/I identity (applies to all populations)
         is_excitatory = jnp.arange(n_total) < int(n_total * p.EXCITATORY_RATIO)
@@ -658,11 +667,11 @@ class SnnAgent:
         # Create connectivity (using vectorized version for speed)
         keys = random.split(key, 3)
         w_mask, w_plastic_mask = create_connectivity_vectorized(
-            keys[0], p, n_total, is_excitatory, neuron_types)
+            keys[0], p, n_total, is_excitatory, neuron_types
+        )
 
         # Initialize weights
-        w = _initialize_weights(
-            keys[1], p, w_mask, is_excitatory, neuron_types)
+        w = _initialize_weights(keys[1], p, w_mask, is_excitatory, neuron_types)
 
         # Initialize state
         return AgentState(
@@ -670,38 +679,31 @@ class SnnAgent:
             v=jnp.full(n_total, p.V_REST),
             spike=jnp.zeros(n_total, dtype=bool),
             refractory=jnp.zeros(n_total),
-
             # Synaptic state
             syn_current_e=jnp.zeros(n_total),
             syn_current_i=jnp.zeros(n_total),
             trace_fast=jnp.zeros(n_total),
             trace_slow=jnp.zeros(n_total),
-
             # Homeostasis
             firing_rate=jnp.full(n_total, p.TARGET_RATE_HZ),
             threshold_adapt=jnp.zeros(n_total),
-
             # Learning
             eligibility_trace=jnp.zeros_like(w),
             dopamine=p.BASELINE_DOPAMINE,
             value_estimate=0.0,
-
             # Connectivity
             w=w,
             w_mask=w_mask,
             w_plastic_mask=w_plastic_mask,
-
             # Identity
             is_excitatory=is_excitatory,
             neuron_types=neuron_types,
-
             # I/O
             motor_trace=jnp.zeros(4),
             input_channels=jnp.zeros(p.NUM_INPUT_CHANNELS),
-
             # Multi-episode learning
             weight_momentum=jnp.zeros_like(w),
-            episodes_completed=0
+            episodes_completed=0,
         )
 
     def _monitor_stability(self, state: AgentState, step: int):
@@ -717,16 +719,20 @@ class SnnAgent:
         # Warn on instabilities
         if self.config.exp_config.check_stability:
             if mean_rate > 50:  # Hz
-                print(
-                    f"⚠️ Warning: High firing rate at step {step}: {mean_rate:.1f} Hz")
+                print(f"⚠️ Warning: High firing rate at step {step}: {mean_rate:.1f} Hz")
             elif mean_rate < 0.1:
-                print(
-                    f"⚠️ Warning: Network too quiet at step {step}: {mean_rate:.1f} Hz")
+                print(f"⚠️ Warning: Network too quiet at step {step}: {mean_rate:.1f} Hz")
 
-    def run_episode(self, episode_key: random.PRNGKey, episode_num: int, exporter: DataExporter,
-                    progress_callback=None) -> Dict[str, Any]:
+    def run_episode(
+        self,
+        episode_key: random.PRNGKey,
+        episode_num: int,
+        exporter: DataExporter,
+        progress_callback=None,
+    ) -> Dict[str, Any]:
         """Run a single episode."""
         import time
+
         episode_start_time = time.time()
 
         # Reset world
@@ -734,8 +740,7 @@ class SnnAgent:
 
         # Reset agent state (soft reset by default, preserving weights)
         if episode_num > 0:
-            self.state = _reset_episode_state(
-                self.state, self.params, soft_reset=True)
+            self.state = _reset_episode_state(self.state, self.params, soft_reset=True)
 
         # Optional weight consolidation
         if episode_num > 0 and episode_num % self.params.CONSOLIDATION_INTERVAL == 0:
@@ -743,9 +748,9 @@ class SnnAgent:
 
         # Start data export
         ep = exporter.start_episode(episode_num)
-        exporter.log_static_episode_data("world_setup", {
-            "reward_positions": np.asarray(world_state.reward_positions)
-        })
+        exporter.log_static_episode_data(
+            "world_setup", {"reward_positions": np.asarray(world_state.reward_positions)}
+        )
 
         # Save network structure
         if episode_num == 0:
@@ -756,30 +761,31 @@ class SnnAgent:
         max_steps = self.config.world_config.max_timesteps
         for step in range(max_steps):
             # Split keys
-            step_key, encode_key, neuron_key, action_key, world_key = random.split(
-                episode_key, 5)
+            step_key, encode_key, neuron_key, action_key, world_key = random.split(episode_key, 5)
             episode_key = step_key
 
             # 1. Encode input
-            input_channels = _encode_gradient_population(
-                obs.gradient, self.params, encode_key)
+            input_channels = _encode_gradient_population(obs.gradient, self.params, encode_key)
             self.state = self.state._replace(input_channels=input_channels)
 
             # 2. Neural dynamics step
             self.state = _neuron_step(self.state, self.params, neuron_key)
 
             # 3. Decode action
-            action, motor_trace = _decode_action(
-                self.state, self.params, action_key)
+            action, motor_trace = _decode_action(self.state, self.params, action_key)
             self.state = self.state._replace(motor_trace=motor_trace)
 
             # 4. Environment step
             result = self.world.step(world_state, int(action), world_key)
-            world_state, obs, reward, done = result.state, result.observation, result.reward, result.done
+            world_state, obs, reward, done = (
+                result.state,
+                result.observation,
+                result.reward,
+                result.done,
+            )
 
             # 5. Learning step
-            self.state = _three_factor_learning(
-                self.state, reward, obs.gradient, self.params)
+            self.state = _three_factor_learning(self.state, reward, obs.gradient, self.params)
 
             # 6. Track rewards
             if reward > 0:
@@ -804,9 +810,9 @@ class SnnAgent:
                     "action": int(action),
                     "pos_x": int(world_state.agent_pos[0]),
                     "pos_y": int(world_state.agent_pos[1]),
-                    "gradient": float(obs.gradient)
+                    "gradient": float(obs.gradient),
                 },
-                reward=float(reward)
+                reward=float(reward),
             )
 
             if done:
@@ -824,11 +830,12 @@ class SnnAgent:
             "final_value_estimate": float(self.state.value_estimate),
             # Multi-episode learning fields
             "episodes_completed": int(self.state.episodes_completed),
-            "current_learning_rate": float(_get_adaptive_learning_rate(self.state.episodes_completed, self.params))
+            "current_learning_rate": float(
+                _get_adaptive_learning_rate(self.state.episodes_completed, self.params)
+            ),
         }
 
-        exporter.end_episode(success=jnp.all(
-            world_state.reward_collected), summary=summary)
+        exporter.end_episode(success=jnp.all(world_state.reward_collected), summary=summary)
 
         return summary
 
@@ -845,19 +852,17 @@ class SnnAgent:
         # Basic structure (required for compatibility)
         # Note: conn_indices[0] is target (row), conn_indices[1] is source (column)
         basic_structure = {
-            'neurons': {
-                'neuron_ids': np.arange(n_neurons),
-                'is_excitatory': np.asarray(self.state.is_excitatory)
+            "neurons": {
+                "neuron_ids": np.arange(n_neurons),
+                "is_excitatory": np.asarray(self.state.is_excitatory),
             },
-            'connections': {
+            "connections": {
                 # Column indices = source neurons
-                'source_ids': np.asarray(conn_indices[1]),
+                "source_ids": np.asarray(conn_indices[1]),
                 # Row indices = target neurons
-                'target_ids': np.asarray(conn_indices[0])
+                "target_ids": np.asarray(conn_indices[0]),
             },
-            'initial_weights': {
-                'weights': np.asarray(self.state.w[:, n_in:][recurrent_mask])
-            }
+            "initial_weights": {"weights": np.asarray(self.state.w[:, n_in:][recurrent_mask])},
         }
 
         # Save basic structure for compatibility
@@ -867,29 +872,32 @@ class SnnAgent:
         # Store as arrays to avoid scalar dataset issues
         enhanced_data = {
             "neuron_types": np.asarray(self.state.neuron_types, dtype=np.int32),
-            "connectivity_stats": np.array([
-                np.sum(self.state.w_mask[:, :n_in]),  # num input connections
-                # num plastic connections
-                np.sum(self.state.w_plastic_mask),
-                # num recurrent connections
-                np.sum(recurrent_mask)
-            ], dtype=np.int32)
+            "connectivity_stats": np.array(
+                [
+                    np.sum(self.state.w_mask[:, :n_in]),  # num input connections
+                    # num plastic connections
+                    np.sum(self.state.w_plastic_mask),
+                    # num recurrent connections
+                    np.sum(recurrent_mask),
+                ],
+                dtype=np.int32,
+            ),
         }
         exporter.log_static_episode_data("network_stats", enhanced_data)
 
     def run_experiment(self):
         """Run complete experiment with multi-episode learning."""
         import time
+
         master_key = random.PRNGKey(self.config.exp_config.seed)
 
         print("Initializing data exporter...")
         with DataExporter(
             experiment_name="snn_agent_phase10",
             output_base_dir=self.config.exp_config.export_dir,
-            compression='gzip',
-            compression_level=1
+            compression="gzip",
+            compression_level=1,
         ) as exporter:
-
             print("Saving configuration...")
             # Save configuration
             exporter.save_config(self.config)
@@ -900,10 +908,10 @@ class SnnAgent:
             experiment_start_time = time.time()
 
             for i in range(self.config.exp_config.n_episodes):
+                print(f"\n--- Episode {i + 1}/{self.config.exp_config.n_episodes} ---")
                 print(
-                    f"\n--- Episode {i+1}/{self.config.exp_config.n_episodes} ---")
-                print(
-                    f"Current learning rate: {_get_adaptive_learning_rate(self.state.episodes_completed, self.params):.6f}")
+                    f"Current learning rate: {_get_adaptive_learning_rate(self.state.episodes_completed, self.params):.6f}"
+                )
 
                 episode_key, master_key = random.split(master_key)
                 episode_start = time.time()
@@ -911,16 +919,14 @@ class SnnAgent:
                 # Progress callback with ETA
                 def progress_callback(step, max_steps, rewards, episode_elapsed):
                     # Calculate progress
-                    progress_pct = ((step + 1) / max_steps) * \
-                        100  # +1 to reach 100%
+                    progress_pct = ((step + 1) / max_steps) * 100  # +1 to reach 100%
                     bar_width = 30
                     filled = int(bar_width * progress_pct / 100)
                     bar = "█" * filled + "░" * (bar_width - filled)
 
                     # Episode ETA
                     if step > 0:
-                        episode_eta = (episode_elapsed / (step + 1)
-                                       ) * (max_steps - step - 1)
+                        episode_eta = (episode_elapsed / (step + 1)) * (max_steps - step - 1)
                     else:
                         episode_eta = 0
 
@@ -929,35 +935,40 @@ class SnnAgent:
                     remaining_episodes = self.config.exp_config.n_episodes - i - 1
 
                     if episode_times:
-                        avg_episode_time = sum(
-                            episode_times) / len(episode_times)
+                        avg_episode_time = sum(episode_times) / len(episode_times)
                     else:
                         # Estimate based on current episode progress
                         if step > 0:
-                            avg_episode_time = (
-                                episode_elapsed / (step + 1)) * max_steps
+                            avg_episode_time = (episode_elapsed / (step + 1)) * max_steps
                         else:
                             avg_episode_time = 60  # Default estimate
 
                     # Remaining time = current episode remaining + future episodes
-                    total_eta = episode_eta + \
-                        (remaining_episodes * avg_episode_time)
+                    total_eta = episode_eta + (remaining_episodes * avg_episode_time)
 
                     # Format times
                     def format_time(seconds):
                         if seconds < 60:
                             return f"{seconds:.0f}s"
                         elif seconds < 3600:
-                            return f"{seconds//60:.0f}m{seconds % 60:.0f}s"
+                            return f"{seconds // 60:.0f}m{seconds % 60:.0f}s"
                         else:
-                            return f"{seconds//3600:.0f}h{(seconds % 3600)//60:.0f}m"
+                            return f"{seconds // 3600:.0f}h{(seconds % 3600) // 60:.0f}m"
 
-                    print(f"\r  {bar} {progress_pct:5.1f}% | Steps: {step+1:,}/{max_steps:,} | "
-                          f"Rewards: {rewards} | Episode ETA: {format_time(episode_eta)} | "
-                          f"Total ETA: {format_time(total_eta)}", end='', flush=True)
+                    print(
+                        f"\r  {bar} {progress_pct:5.1f}% | Steps: {step + 1:,}/{max_steps:,} | "
+                        f"Rewards: {rewards} | Episode ETA: {format_time(episode_eta)} | "
+                        f"Total ETA: {format_time(total_eta)}",
+                        end="",
+                        flush=True,
+                    )
 
-                summary = self.run_episode(episode_key, episode_num=i, exporter=exporter,
-                                           progress_callback=progress_callback)
+                summary = self.run_episode(
+                    episode_key,
+                    episode_num=i,
+                    exporter=exporter,
+                    progress_callback=progress_callback,
+                )
                 all_summaries.append(summary)
 
                 # Track episode time
@@ -968,23 +979,18 @@ class SnnAgent:
                 print(f"  Episode Time: {episode_time:.1f}s")
                 print(f"  Total Reward: {summary['total_reward']:.2f}")
                 print(f"  Rewards Collected: {summary['rewards_collected']}")
-                print(
-                    f"  Mean Firing Rate: {summary['mean_firing_rate']:.1f} Hz")
+                print(f"  Mean Firing Rate: {summary['mean_firing_rate']:.1f} Hz")
 
                 # Check for learning
                 if i > 0:
-                    reward_trend = summary['total_reward'] - \
-                        all_summaries[0]['total_reward']
+                    reward_trend = summary["total_reward"] - all_summaries[0]["total_reward"]
                     print(f"  Reward Δ from first: {reward_trend:+.2f}")
 
                     # Check improvement over last 5 episodes
                     if i >= 5:
-                        recent_avg = sum(s['total_reward']
-                                         for s in all_summaries[-5:]) / 5
-                        early_avg = sum(s['total_reward']
-                                        for s in all_summaries[:5]) / 5
+                        recent_avg = sum(s["total_reward"] for s in all_summaries[-5:]) / 5
+                        early_avg = sum(s["total_reward"] for s in all_summaries[:5]) / 5
                         improvement = recent_avg - early_avg
-                        print(
-                            f"  Avg reward improvement (last 5 vs first 5): {improvement:+.2f}")
+                        print(f"  Avg reward improvement (last 5 vs first 5): {improvement:+.2f}")
 
         return all_summaries

@@ -1,18 +1,15 @@
 #!/usr/bin/env python3
 """Test that simple_grid_0003 is a drop-in replacement for 0001 and 0002."""
 
-import simple_grid_0003
-import simple_grid_0002
 import simple_grid_0001
-from simple_grid_0003 import StepResult as Result3
-from simple_grid_0003 import Observation as Obs3
-from simple_grid_0003 import WorldState as State3
-from simple_grid_0003 import WorldConfig as Config3
-from simple_grid_0003 import SimpleGridWorld as World3
-from simple_grid_0001 import WorldConfig, WorldState, Observation, StepResult
-from simple_grid_0001 import SimpleGridWorld as World1
-import jax
+import simple_grid_0002
+import simple_grid_0003
 from jax import random
+from simple_grid_0001 import Observation, StepResult, WorldConfig, WorldState
+from simple_grid_0003 import Observation as Obs3
+from simple_grid_0003 import StepResult as Result3
+from simple_grid_0003 import WorldConfig as Config3
+from simple_grid_0003 import WorldState as State3
 
 # Test importing from different versions
 print("Testing import compatibility...")

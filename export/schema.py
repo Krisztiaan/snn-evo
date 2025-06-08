@@ -1,7 +1,8 @@
 # keywords: [schema, validation, versioning, data types]
 """Data schema definitions and validation for export system."""
 
-from typing import Dict, Any, Optional, List, Union, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
+
 import numpy as np
 
 SCHEMA_VERSION = "3.0.0"

@@ -19,19 +19,20 @@ Original features maintained:
 - Command-line interface
 """
 
+import argparse
+import gzip
+import json
+import os
+import pickle
+import sys
+import time
+from datetime import datetime
+from typing import Dict, NamedTuple, Tuple
+
 import jax
 import jax.numpy as jnp
-from jax import random, jit, vmap
 import numpy as np
-from typing import NamedTuple, Tuple, Dict, List
-import os
-import json
-import argparse
-import sys
-from datetime import datetime
-import time
-import gzip
-import pickle
+from jax import jit, random
 
 # Configuration
 GRID_WORLD_SIZE = 100
@@ -47,6 +48,7 @@ PROXIMITY_REWARD_MED = 0.2
 
 class NetworkParams(NamedTuple):
     """Parameters for the spiking neural network with biological features"""
+
     NUM_NEURONS: int = 256
     NUM_INPUTS: int = 1
     NUM_OUTPUTS: int = 4
@@ -84,6 +86,7 @@ class NetworkParams(NamedTuple):
 
 class NetworkState(NamedTuple):
     """State of the spiking neural network with biological features"""
+
     # Basic neural state
     v: jnp.ndarray  # Membrane potentials
     spike: jnp.ndarray  # Current spikes
@@ -135,11 +138,11 @@ def compute_gradient_vectorized(pos, reward_positions, active_rewards, grid_size
         # Toroidal distance calculation - vectorized
         dx = jnp.minimum(
             jnp.abs(pos[0] - reward_positions_2d[:, 0]),
-            grid_size - jnp.abs(pos[0] - reward_positions_2d[:, 0])
+            grid_size - jnp.abs(pos[0] - reward_positions_2d[:, 0]),
         )
         dy = jnp.minimum(
             jnp.abs(pos[1] - reward_positions_2d[:, 1]),
-            grid_size - jnp.abs(pos[1] - reward_positions_2d[:, 1])
+            grid_size - jnp.abs(pos[1] - reward_positions_2d[:, 1]),
         )
 
         # All distances at once
@@ -158,8 +161,8 @@ def compute_gradient_vectorized(pos, reward_positions, active_rewards, grid_size
             jnp.where(
                 closest_dist < 15,
                 0.8 - 0.6 * ((closest_dist - 5) / 10),
-                0.2 * jnp.exp(-closest_dist / 30)
-            )
+                0.2 * jnp.exp(-closest_dist / 30),
+            ),
         )
 
         return jnp.where(closest_dist > 1e5, 0.0, gradient)
@@ -195,9 +198,7 @@ def step_vectorized(agent_pos, action, reward_positions, active_rewards, grid_si
 
     # Use JAX conditional
     collected_reward, new_active_rewards = jax.lax.cond(
-        empty_case,
-        lambda: empty_case_result(),
-        lambda: compute_normal_step()
+        empty_case, lambda: empty_case_result(), lambda: compute_normal_step()
     )
 
     return new_pos, collected_reward, new_active_rewards
@@ -249,8 +250,7 @@ class OptimizedGridWorld:
             center = random.randint(center_key, (2,), 0, self.grid_size)
 
             # Generate rewards for this cluster
-            num_rewards_this_cluster = min(
-                rewards_per_cluster, NUM_REWARDS - len(all_positions))
+            num_rewards_this_cluster = min(rewards_per_cluster, NUM_REWARDS - len(all_positions))
             if num_rewards_this_cluster <= 0:
                 break
 
@@ -341,15 +341,14 @@ def initialize_network(key: jax.random.PRNGKey, params: NetworkParams) -> Networ
     trace_slow = jnp.zeros(params.NUM_NEURONS)
 
     # Initialize weights with E/I constraints
-    w_in = random.uniform(keys[0], (params.NUM_INPUTS, params.NUM_NEURONS),
-                          minval=0.5, maxval=2.0)
+    w_in = random.uniform(keys[0], (params.NUM_INPUTS, params.NUM_NEURONS), minval=0.5, maxval=2.0)
 
     # PHASE 1 FIX: Create connection mask with biologically plausible probabilities
     # Different connection probabilities by type
-    P_EE = 0.1   # E→E connection probability
-    P_EI = 0.3   # E→I connection probability
-    P_IE = 0.4   # I→E connection probability
-    P_II = 0.2   # I→I connection probability
+    P_EE = 0.1  # E→E connection probability
+    P_EI = 0.3  # E→I connection probability
+    P_IE = 0.4  # I→E connection probability
+    P_II = 0.2  # I→I connection probability
 
     # Create connection probability matrix
     prob_matrix = jnp.zeros((params.NUM_NEURONS, params.NUM_NEURONS))
@@ -364,15 +363,14 @@ def initialize_network(key: jax.random.PRNGKey, params: NetworkParams) -> Networ
     prob_matrix = jnp.where(II_mask, P_II, prob_matrix)
 
     # Generate connections based on probabilities
-    connection_rand = random.uniform(
-        keys[1], (params.NUM_NEURONS, params.NUM_NEURONS))
+    connection_rand = random.uniform(keys[1], (params.NUM_NEURONS, params.NUM_NEURONS))
     connection_mask = connection_rand < prob_matrix
-    connection_mask = connection_mask.at[jnp.diag_indices(
-        params.NUM_NEURONS)].set(False)  # No self-connections
+    connection_mask = connection_mask.at[jnp.diag_indices(params.NUM_NEURONS)].set(
+        False
+    )  # No self-connections
 
     # Initialize recurrent weights only where connections exist
-    w = random.uniform(keys[2], (params.NUM_NEURONS, params.NUM_NEURONS),
-                       minval=0.0, maxval=0.1)
+    w = random.uniform(keys[2], (params.NUM_NEURONS, params.NUM_NEURONS), minval=0.0, maxval=0.1)
     w = jnp.where(connection_mask, w, 0.0)
 
     # PHASE 1 FIX: Apply Dale's principle correctly
@@ -380,8 +378,9 @@ def initialize_network(key: jax.random.PRNGKey, params: NetworkParams) -> Networ
     w = apply_dale_principle_correct(w, is_excitatory)
 
     # Output weights (only from excitatory neurons to motor outputs)
-    w_out = random.uniform(keys[3], (params.NUM_NEURONS, params.NUM_OUTPUTS),
-                           minval=0.0, maxval=0.1)
+    w_out = random.uniform(
+        keys[3], (params.NUM_NEURONS, params.NUM_OUTPUTS), minval=0.0, maxval=0.1
+    )
     w_out = jnp.where(is_excitatory[:, None], w_out, 0.0)
 
     # Learning state
@@ -397,14 +396,23 @@ def initialize_network(key: jax.random.PRNGKey, params: NetworkParams) -> Networ
     prev_value = 0.0
 
     return NetworkState(
-        v=v, spike=spike, refractory=refractory,
+        v=v,
+        spike=spike,
+        refractory=refractory,
         is_excitatory=is_excitatory,
-        syn_current=syn_current, trace_fast=trace_fast, trace_slow=trace_slow,
-        eligibility_trace=eligibility_trace, dopamine=dopamine,
-        w=w, w_in=w_in, w_out=w_out,
-        motor_spikes=motor_spikes, motor_trace=motor_trace,
+        syn_current=syn_current,
+        trace_fast=trace_fast,
+        trace_slow=trace_slow,
+        eligibility_trace=eligibility_trace,
+        dopamine=dopamine,
+        w=w,
+        w_in=w_in,
+        w_out=w_out,
+        motor_spikes=motor_spikes,
+        motor_trace=motor_trace,
         connection_mask=connection_mask,
-        value_estimate=value_estimate, prev_value=prev_value
+        value_estimate=value_estimate,
+        prev_value=prev_value,
     )
 
 
@@ -429,7 +437,9 @@ def apply_dale_principle_correct(w: jnp.ndarray, is_excitatory: jnp.ndarray) -> 
 
 
 @jit
-def neuron_step(state: NetworkState, input_current: float, params: NetworkParams, key: jax.random.PRNGKey) -> NetworkState:
+def neuron_step(
+    state: NetworkState, input_current: float, params: NetworkParams, key: jax.random.PRNGKey
+) -> NetworkState:
     """Neuron step with refractory periods and synaptic currents"""
     BASELINE_CURRENT = 5.0
     NOISE_SCALE = 2.0
@@ -438,7 +448,7 @@ def neuron_step(state: NetworkState, input_current: float, params: NetworkParams
     refractory_new = jnp.maximum(0, state.refractory - 1.0)
 
     # Synaptic currents with proper decay
-    syn_current_new = state.syn_current * jnp.exp(-1.0/params.TAU_SYN)
+    syn_current_new = state.syn_current * jnp.exp(-1.0 / params.TAU_SYN)
 
     # Add incoming spikes to synaptic current (respecting Dale's principle)
     # Use biologically plausible synaptic strengths
@@ -464,14 +474,11 @@ def neuron_step(state: NetworkState, input_current: float, params: NetworkParams
 
     # Reset voltage and set refractory period for spiking neurons
     v_new = jnp.where(spike_new, params.V_RESET, v_new)
-    refractory_new = jnp.where(
-        spike_new, params.REFRACTORY_TIME, refractory_new)
+    refractory_new = jnp.where(spike_new, params.REFRACTORY_TIME, refractory_new)
 
     # Update traces
-    trace_fast_new = state.trace_fast * \
-        jnp.exp(-1.0/params.TAU_FAST) + spike_new * 1.0
-    trace_slow_new = state.trace_slow * \
-        jnp.exp(-1.0/params.TAU_SLOW) + spike_new * 0.5
+    trace_fast_new = state.trace_fast * jnp.exp(-1.0 / params.TAU_FAST) + spike_new * 1.0
+    trace_slow_new = state.trace_slow * jnp.exp(-1.0 / params.TAU_SLOW) + spike_new * 0.5
 
     return state._replace(
         v=v_new,
@@ -479,15 +486,12 @@ def neuron_step(state: NetworkState, input_current: float, params: NetworkParams
         refractory=refractory_new,
         syn_current=syn_current_new,
         trace_fast=trace_fast_new,
-        trace_slow=trace_slow_new
+        trace_slow=trace_slow_new,
     )
 
 
 @jit
-def compute_eligibility_trace_fixed(
-    state: NetworkState,
-    params: NetworkParams
-) -> jnp.ndarray:
+def compute_eligibility_trace_fixed(state: NetworkState, params: NetworkParams) -> jnp.ndarray:
     """PHASE 1 FIX: Compute eligibility traces with proper pre/post synaptic pairs
 
     Only computes STDP for existing connections using the connection mask.
@@ -507,15 +511,10 @@ def compute_eligibility_trace_fixed(
     # STDP computation
     # Pre before post -> LTP
     ltp = pre_trace_expanded * post_spike_expanded.astype(float)
-    ltd = pre_spike_expanded.astype(
-        float) * post_trace_expanded  # Post before pre -> LTD
+    ltd = pre_spike_expanded.astype(float) * post_trace_expanded  # Post before pre -> LTD
 
     # Apply STDP only to existing connections
-    stdp = jnp.where(
-        state.connection_mask,
-        params.A_PLUS * ltp - params.A_MINUS * ltd,
-        0.0
-    )
+    stdp = jnp.where(state.connection_mask, params.A_PLUS * ltp - params.A_MINUS * ltd, 0.0)
 
     # Decay eligibility traces
     decay = jnp.exp(-1.0 / params.TAU_ELIGIBILITY)
@@ -528,7 +527,7 @@ def compute_eligibility_trace_fixed(
 def three_factor_update_fixed(
     state: NetworkState,
     dopamine_modulation: float,  # This is now the RPE-based modulation
-    params: NetworkParams
+    params: NetworkParams,
 ) -> Tuple[jnp.ndarray, jnp.ndarray]:
     """PHASE 1 FIX: Three-factor learning with proper Dale's principle maintenance"""
 
@@ -542,16 +541,13 @@ def three_factor_update_fixed(
     updated_weights = state.w + dw
 
     # Maintain Dale's principle after update
-    updated_weights = apply_dale_principle_correct(
-        updated_weights, state.is_excitatory)
+    updated_weights = apply_dale_principle_correct(updated_weights, state.is_excitatory)
 
     # Ensure weights stay in reasonable bounds
     # E synapses: [0, 1], I synapses: [-1, 0]
     E_mask = state.is_excitatory[:, None]
     updated_weights = jnp.where(
-        E_mask,
-        jnp.clip(updated_weights, 0.0, 1.0),
-        jnp.clip(updated_weights, -1.0, 0.0)
+        E_mask, jnp.clip(updated_weights, 0.0, 1.0), jnp.clip(updated_weights, -1.0, 0.0)
     )
 
     # Zero out non-existent connections
@@ -565,9 +561,7 @@ def three_factor_update_fixed(
 
 @jit
 def update_dopamine_with_rpe(
-    state: NetworkState,
-    reward: float,
-    params: NetworkParams
+    state: NetworkState, reward: float, params: NetworkParams
 ) -> Tuple[float, float, float]:
     """PHASE 1 FIX: Update dopamine based on reward prediction error
 
@@ -575,16 +569,14 @@ def update_dopamine_with_rpe(
     """
     # Compute TD error (reward prediction error)
     # TD error = reward + γ * V(s') - V(s)
-    td_error = reward + params.REWARD_DISCOUNT * \
-        state.value_estimate - state.prev_value
+    td_error = reward + params.REWARD_DISCOUNT * state.value_estimate - state.prev_value
 
     # Update value estimate using TD learning
     new_value = state.value_estimate + params.REWARD_PREDICTION_RATE * td_error
 
     # Decay dopamine towards baseline
     decay = jnp.exp(-1.0 / params.TAU_DOPAMINE)
-    baseline_dopamine = state.dopamine * decay + \
-        params.BASELINE_DOPAMINE * (1 - decay)
+    baseline_dopamine = state.dopamine * decay + params.BASELINE_DOPAMINE * (1 - decay)
 
     # Dopamine responds to prediction error, not raw reward
     # Positive RPE -> phasic burst, Negative RPE -> phasic dip
@@ -626,10 +618,7 @@ def make_decision(state: NetworkState, key: jax.random.PRNGKey) -> Tuple[int, Ne
     motor_spikes = jnp.zeros(4, dtype=bool).at[action].set(True)
     motor_trace = state.motor_trace * 0.9 + motor_spikes * 1.0
 
-    return action, state._replace(
-        motor_spikes=motor_spikes,
-        motor_trace=motor_trace
-    )
+    return action, state._replace(motor_spikes=motor_spikes, motor_trace=motor_trace)
 
 
 class StreamingDataLogger:
@@ -646,45 +635,42 @@ class StreamingDataLogger:
         # Agent trajectory (already complete in original)
 
         # Reward states over time
-        self.files['reward_states'] = np.memmap(
+        self.files["reward_states"] = np.memmap(
             f"{self.episode_dir}/reward_states.dat",
-            dtype='bool',
-            mode='w+',
-            shape=(max_steps, num_rewards)
+            dtype="bool",
+            mode="w+",
+            shape=(max_steps, num_rewards),
         )
 
         # Full neural activity (if requested)
-        self.files['spikes'] = np.memmap(
+        self.files["spikes"] = np.memmap(
             f"{self.episode_dir}/spike_trains_full.dat",
-            dtype='bool',
-            mode='w+',
-            shape=(max_steps, num_neurons)
+            dtype="bool",
+            mode="w+",
+            shape=(max_steps, num_neurons),
         )
 
-        self.files['voltages'] = np.memmap(
+        self.files["voltages"] = np.memmap(
             f"{self.episode_dir}/voltages_full.dat",
-            dtype='float32',
-            mode='w+',
-            shape=(max_steps, num_neurons)
+            dtype="float32",
+            mode="w+",
+            shape=(max_steps, num_neurons),
         )
 
         # Synaptic weight changes log
-        self.weight_change_log = open(
-            f"{self.episode_dir}/weight_changes.csv", 'w')
-        self.weight_change_log.write(
-            "step,pre_idx,post_idx,old_weight,new_weight,delta\n")
+        self.weight_change_log = open(f"{self.episode_dir}/weight_changes.csv", "w")
+        self.weight_change_log.write("step,pre_idx,post_idx,old_weight,new_weight,delta\n")
 
     def log_timestep(self, step: int, state, env):
         """Log data for current timestep"""
         # Reward states
-        self.files['reward_states'][step] = env.active_rewards
+        self.files["reward_states"][step] = env.active_rewards
 
         # Neural activity
-        self.files['spikes'][step] = state.spike
-        self.files['voltages'][step] = state.v
+        self.files["spikes"][step] = state.spike
+        self.files["voltages"][step] = state.v
 
-    def log_weight_change(self, step: int, pre_idx: int, post_idx: int,
-                          old_w: float, new_w: float):
+    def log_weight_change(self, step: int, pre_idx: int, post_idx: int, old_w: float, new_w: float):
         """Log individual synaptic weight change"""
         delta = new_w - old_w
         self.weight_change_log.write(
@@ -694,7 +680,7 @@ class StreamingDataLogger:
     def close(self):
         """Close all file handles"""
         for f in self.files.values():
-            if hasattr(f, 'flush'):
+            if hasattr(f, "flush"):
                 f.flush()
         self.weight_change_log.close()
 
@@ -736,16 +722,11 @@ def run_episode(seed: int, progress_callback=None, full_trace=False, episode_dir
     sample_interval = 100  # Sample every 100 steps
     num_samples = max_steps // sample_interval
     spike_trains = np.zeros((num_samples, params.NUM_NEURONS), dtype=bool)
-    membrane_potentials = np.zeros(
-        (num_samples, params.NUM_NEURONS), dtype=np.float32)
-    synaptic_traces_fast = np.zeros(
-        (num_samples, params.NUM_NEURONS), dtype=np.float32)
-    synaptic_traces_slow = np.zeros(
-        (num_samples, params.NUM_NEURONS), dtype=np.float32)
-    synaptic_currents = np.zeros(
-        (num_samples, params.NUM_NEURONS), dtype=np.float32)
-    refractory_states = np.zeros(
-        (num_samples, params.NUM_NEURONS), dtype=np.float32)
+    membrane_potentials = np.zeros((num_samples, params.NUM_NEURONS), dtype=np.float32)
+    synaptic_traces_fast = np.zeros((num_samples, params.NUM_NEURONS), dtype=np.float32)
+    synaptic_traces_slow = np.zeros((num_samples, params.NUM_NEURONS), dtype=np.float32)
+    synaptic_currents = np.zeros((num_samples, params.NUM_NEURONS), dtype=np.float32)
+    refractory_states = np.zeros((num_samples, params.NUM_NEURONS), dtype=np.float32)
     dopamine_levels = np.zeros(num_samples, dtype=np.float32)
     # PHASE 1 FIX: Track TD errors
     td_errors = np.zeros(num_samples, dtype=np.float32)
@@ -793,20 +774,16 @@ def run_episode(seed: int, progress_callback=None, full_trace=False, episode_dir
         state = state._replace(prev_value=state.value_estimate)
 
         # PHASE 1 FIX: Update dopamine based on reward prediction error
-        new_dopamine, new_value, td_error = update_dopamine_with_rpe(
-            state, reward, params)
+        new_dopamine, new_value, td_error = update_dopamine_with_rpe(state, reward, params)
         state = state._replace(dopamine=new_dopamine, value_estimate=new_value)
 
         # PHASE 1 FIX: Compute dopamine modulation factor (graded, not binary)
-        dopamine_modulation = compute_dopamine_modulation(
-            state.dopamine, params.BASELINE_DOPAMINE)
+        dopamine_modulation = compute_dopamine_modulation(state.dopamine, params.BASELINE_DOPAMINE)
 
         # PHASE 1 FIX: Three-factor learning with graded modulation
         # Always allow learning, but direction/magnitude depends on dopamine
         new_w, new_eligibility = three_factor_update_fixed(
-            state._replace(eligibility_trace=new_eligibility),
-            dopamine_modulation,
-            params
+            state._replace(eligibility_trace=new_eligibility), dopamine_modulation, params
         )
         state = state._replace(w=new_w, eligibility_trace=new_eligibility)
 
@@ -836,33 +813,36 @@ def run_episode(seed: int, progress_callback=None, full_trace=False, episode_dir
 
         # Save weight snapshots
         if step % weight_snapshot_interval == 0:
-            weight_snapshots.append({
-                'step': step,
-                'w': np.array(state.w),
-                'w_in': np.array(state.w_in),
-                'w_out': np.array(state.w_out),
-                'eligibility': np.array(state.eligibility_trace),
-                'dopamine': float(state.dopamine),
-                'value_estimate': float(state.value_estimate),  # PHASE 1 FIX
-                'td_error': float(td_error)  # PHASE 1 FIX
-            })
+            weight_snapshots.append(
+                {
+                    "step": step,
+                    "w": np.array(state.w),
+                    "w_in": np.array(state.w_in),
+                    "w_out": np.array(state.w_out),
+                    "eligibility": np.array(state.eligibility_trace),
+                    "dopamine": float(state.dopamine),
+                    "value_estimate": float(state.value_estimate),  # PHASE 1 FIX
+                    "td_error": float(td_error),  # PHASE 1 FIX
+                }
+            )
 
         # Progress callback
         if progress_callback and step % 1000 == 0:
-            progress_callback(step, max_steps, len(
-                reward_steps), len(proximity_reward_steps))
+            progress_callback(step, max_steps, len(reward_steps), len(proximity_reward_steps))
 
     # Final weight snapshot
-    weight_snapshots.append({
-        'step': max_steps,
-        'w': np.array(state.w),
-        'w_in': np.array(state.w_in),
-        'w_out': np.array(state.w_out),
-        'eligibility': np.array(state.eligibility_trace),
-        'dopamine': float(state.dopamine),
-        'value_estimate': float(state.value_estimate),
-        'td_error': 0.0  # No error at end
-    })
+    weight_snapshots.append(
+        {
+            "step": max_steps,
+            "w": np.array(state.w),
+            "w_in": np.array(state.w_in),
+            "w_out": np.array(state.w_out),
+            "eligibility": np.array(state.eligibility_trace),
+            "dopamine": float(state.dopamine),
+            "value_estimate": float(state.value_estimate),
+            "td_error": 0.0,  # No error at end
+        }
+    )
 
     # Close streaming logger if used
     if logger:
@@ -872,47 +852,47 @@ def run_episode(seed: int, progress_callback=None, full_trace=False, episode_dir
 
     # Comprehensive results
     return {
-        'metadata': {
-            'seed': seed,
-            'episode_time_seconds': episode_time,
-            'steps_completed': max_steps,
-            'rewards_collected': len(reward_steps),
-            'proximity_rewards_collected': len(proximity_reward_steps),
-            'unique_positions_visited': len(unique_positions),
-            'network_params': params._asdict()
+        "metadata": {
+            "seed": seed,
+            "episode_time_seconds": episode_time,
+            "steps_completed": max_steps,
+            "rewards_collected": len(reward_steps),
+            "proximity_rewards_collected": len(proximity_reward_steps),
+            "unique_positions_visited": len(unique_positions),
+            "network_params": params._asdict(),
         },
-        'trajectory': {
-            'positions': positions,
-            'actions': actions,
-            'gradients': gradients,
-            'rewards': rewards,
-            'reward_steps': np.array(reward_steps),
-            'proximity_reward_steps': np.array(proximity_reward_steps)
+        "trajectory": {
+            "positions": positions,
+            "actions": actions,
+            "gradients": gradients,
+            "rewards": rewards,
+            "reward_steps": np.array(reward_steps),
+            "proximity_reward_steps": np.array(proximity_reward_steps),
         },
-        'neural_dynamics': {
-            'spike_trains': spike_trains,
-            'membrane_potentials': membrane_potentials,
-            'synaptic_traces_fast': synaptic_traces_fast,
-            'synaptic_traces_slow': synaptic_traces_slow,
-            'synaptic_currents': synaptic_currents,
-            'refractory_states': refractory_states,
-            'dopamine_levels': dopamine_levels,
-            'td_errors': td_errors,  # PHASE 1 FIX: Include TD errors
-            'sample_interval': sample_interval
+        "neural_dynamics": {
+            "spike_trains": spike_trains,
+            "membrane_potentials": membrane_potentials,
+            "synaptic_traces_fast": synaptic_traces_fast,
+            "synaptic_traces_slow": synaptic_traces_slow,
+            "synaptic_currents": synaptic_currents,
+            "refractory_states": refractory_states,
+            "dopamine_levels": dopamine_levels,
+            "td_errors": td_errors,  # PHASE 1 FIX: Include TD errors
+            "sample_interval": sample_interval,
         },
-        'network_properties': {
-            'is_excitatory': np.array(state.is_excitatory),
-            'num_excitatory': int(np.sum(state.is_excitatory)),
-            'num_inhibitory': int(np.sum(~state.is_excitatory)),
-            'connection_mask': np.array(state.connection_mask)  # PHASE 1 FIX
+        "network_properties": {
+            "is_excitatory": np.array(state.is_excitatory),
+            "num_excitatory": int(np.sum(state.is_excitatory)),
+            "num_inhibitory": int(np.sum(~state.is_excitatory)),
+            "connection_mask": np.array(state.connection_mask),  # PHASE 1 FIX
         },
-        'weight_evolution': weight_snapshots,
-        'environment': {
-            'grid_size': GRID_WORLD_SIZE,
-            'num_rewards': NUM_REWARDS,
-            'reward_positions': np.array(env.reward_positions),
-            'initial_agent_pos': np.array(positions[0])
-        }
+        "weight_evolution": weight_snapshots,
+        "environment": {
+            "grid_size": GRID_WORLD_SIZE,
+            "num_rewards": NUM_REWARDS,
+            "reward_positions": np.array(env.reward_positions),
+            "initial_agent_pos": np.array(positions[0]),
+        },
     }
 
 
@@ -920,31 +900,24 @@ def reconstruct_reward_field(episode_dir: str, timestep: int):
     """
     Reconstruct exact reward field at any timestep
     """
-    reward_states = np.memmap(
-        f"{episode_dir}/reward_states.dat",
-        dtype='bool',
-        mode='r'
-    )
+    reward_states = np.memmap(f"{episode_dir}/reward_states.dat", dtype="bool", mode="r")
     env_data = np.load(f"{episode_dir}/environment.npz")
 
     active_rewards = reward_states[timestep]
-    reward_positions = env_data['reward_positions'][active_rewards]
+    reward_positions = env_data["reward_positions"][active_rewards]
 
     return reward_positions
 
 
-def trace_spike_causality(episode_dir: str, neuron_idx: int,
-                          start_step: int, window: int = 100):
+def trace_spike_causality(episode_dir: str, neuron_idx: int, start_step: int, window: int = 100):
     """
     Trace what caused a specific neuron to spike
     """
-    spikes = np.memmap(
-        f"{episode_dir}/spike_trains_full.dat", dtype='bool', mode='r')
-    voltages = np.memmap(
-        f"{episode_dir}/voltages_full.dat", dtype='float32', mode='r')
+    spikes = np.memmap(f"{episode_dir}/spike_trains_full.dat", dtype="bool", mode="r")
+    voltages = np.memmap(f"{episode_dir}/voltages_full.dat", dtype="float32", mode="r")
 
     # Find spike time
-    spike_times = np.where(spikes[start_step:start_step+window, neuron_idx])[0]
+    spike_times = np.where(spikes[start_step : start_step + window, neuron_idx])[0]
 
     if len(spike_times) == 0:
         return None
@@ -953,7 +926,7 @@ def trace_spike_causality(episode_dir: str, neuron_idx: int,
 
     # Look at pre-synaptic activity
     network_props = np.load(f"{episode_dir}/network_properties.npz")
-    connection_mask = network_props['connection_mask']
+    connection_mask = network_props["connection_mask"]
 
     # Which neurons connect to this neuron?
     pre_synaptic = np.where(connection_mask[:, neuron_idx])[0]
@@ -962,17 +935,15 @@ def trace_spike_causality(episode_dir: str, neuron_idx: int,
     recent_window = 20  # ms
     pre_spike_times = {}
     for pre_idx in pre_synaptic:
-        pre_spikes = np.where(
-            spikes[spike_time-recent_window:spike_time, pre_idx]
-        )[0]
+        pre_spikes = np.where(spikes[spike_time - recent_window : spike_time, pre_idx])[0]
         if len(pre_spikes) > 0:
             pre_spike_times[pre_idx] = spike_time - recent_window + pre_spikes
 
     return {
-        'neuron': neuron_idx,
-        'spike_time': spike_time,
-        'voltage_trajectory': voltages[spike_time-50:spike_time+10, neuron_idx],
-        'pre_synaptic_spikes': pre_spike_times
+        "neuron": neuron_idx,
+        "spike_time": spike_time,
+        "voltage_trajectory": voltages[spike_time - 50 : spike_time + 10, neuron_idx],
+        "pre_synaptic_spikes": pre_spike_times,
     }
 
 
@@ -982,45 +953,37 @@ def save_episode_data(episode_data: Dict, output_dir: str, episode_num: int):
     os.makedirs(episode_dir, exist_ok=True)
 
     # Save metadata as JSON
-    with open(os.path.join(episode_dir, 'metadata.json'), 'w') as f:
-        json.dump(episode_data['metadata'], f, indent=2)
+    with open(os.path.join(episode_dir, "metadata.json"), "w") as f:
+        json.dump(episode_data["metadata"], f, indent=2)
 
     # Save trajectory data
-    np.savez_compressed(
-        os.path.join(episode_dir, 'trajectory.npz'),
-        **episode_data['trajectory']
-    )
+    np.savez_compressed(os.path.join(episode_dir, "trajectory.npz"), **episode_data["trajectory"])
 
     # Save neural dynamics
     np.savez_compressed(
-        os.path.join(episode_dir, 'neural_dynamics.npz'),
-        **episode_data['neural_dynamics']
+        os.path.join(episode_dir, "neural_dynamics.npz"), **episode_data["neural_dynamics"]
     )
 
     # Save weight evolution
-    with gzip.open(os.path.join(episode_dir, 'weight_evolution.pkl.gz'), 'wb') as f:
-        pickle.dump(episode_data['weight_evolution'], f)
+    with gzip.open(os.path.join(episode_dir, "weight_evolution.pkl.gz"), "wb") as f:
+        pickle.dump(episode_data["weight_evolution"], f)
 
     # Save environment info
-    np.savez_compressed(
-        os.path.join(episode_dir, 'environment.npz'),
-        **episode_data['environment']
-    )
+    np.savez_compressed(os.path.join(episode_dir, "environment.npz"), **episode_data["environment"])
 
     # Save network properties
     np.savez_compressed(
-        os.path.join(episode_dir, 'network_properties.npz'),
-        **episode_data['network_properties']
+        os.path.join(episode_dir, "network_properties.npz"), **episode_data["network_properties"]
     )
 
     # Create summary CSV for quick access
     summary_data = {
-        'episode': episode_num,
-        'seed': episode_data['metadata']['seed'],
-        'time_seconds': episode_data['metadata']['episode_time_seconds'],
-        'rewards': episode_data['metadata']['rewards_collected'],
-        'proximity_rewards': episode_data['metadata']['proximity_rewards_collected'],
-        'coverage': episode_data['metadata']['unique_positions_visited']
+        "episode": episode_num,
+        "seed": episode_data["metadata"]["seed"],
+        "time_seconds": episode_data["metadata"]["episode_time_seconds"],
+        "rewards": episode_data["metadata"]["rewards_collected"],
+        "proximity_rewards": episode_data["metadata"]["proximity_rewards_collected"],
+        "coverage": episode_data["metadata"]["unique_positions_visited"],
     }
 
     return summary_data
@@ -1036,47 +999,41 @@ def run_experiment(args):
 
     # Save configuration
     config = {
-        'num_episodes': args.num_episodes,
-        'seeds': list(range(args.seed_start, args.seed_start + args.num_episodes)),
-        'grid_size': GRID_WORLD_SIZE,
-        'num_rewards': NUM_REWARDS,
-        'max_steps': MAX_EPISODE_STEPS,
-        'network_params': NetworkParams()._asdict(),
-        'proximity_thresholds': {
-            'high': PROXIMITY_THRESHOLD_HIGH,
-            'med': PROXIMITY_THRESHOLD_MED
+        "num_episodes": args.num_episodes,
+        "seeds": list(range(args.seed_start, args.seed_start + args.num_episodes)),
+        "grid_size": GRID_WORLD_SIZE,
+        "num_rewards": NUM_REWARDS,
+        "max_steps": MAX_EPISODE_STEPS,
+        "network_params": NetworkParams()._asdict(),
+        "proximity_thresholds": {"high": PROXIMITY_THRESHOLD_HIGH, "med": PROXIMITY_THRESHOLD_MED},
+        "proximity_rewards": {"high": PROXIMITY_REWARD_HIGH, "med": PROXIMITY_REWARD_MED},
+        "timestamp": timestamp,
+        "command": " ".join(sys.argv),
+        "full_trace": args.full_trace,
+        "phase1_fixes": {  # PHASE 1 FIX: Document fixes
+            "eligibility_trace": "Fixed with proper pre/post synaptic tracking",
+            "dale_principle": "Correctly applied based on pre-synaptic type",
+            "dopamine": "Reward prediction error instead of raw reward",
+            "learning": "Graded modulation instead of binary threshold",
         },
-        'proximity_rewards': {
-            'high': PROXIMITY_REWARD_HIGH,
-            'med': PROXIMITY_REWARD_MED
-        },
-        'timestamp': timestamp,
-        'command': ' '.join(sys.argv),
-        'full_trace': args.full_trace,
-        'phase1_fixes': {  # PHASE 1 FIX: Document fixes
-            'eligibility_trace': 'Fixed with proper pre/post synaptic tracking',
-            'dale_principle': 'Correctly applied based on pre-synaptic type',
-            'dopamine': 'Reward prediction error instead of raw reward',
-            'learning': 'Graded modulation instead of binary threshold'
-        }
     }
 
-    with open(os.path.join(output_dir, 'config.json'), 'w') as f:
+    with open(os.path.join(output_dir, "config.json"), "w") as f:
         json.dump(config, f, indent=2)
 
-    print(f"\n🧪 Phase 0.4 Research Experiment (FIXED)")
+    print("\n🧪 Phase 0.4 Research Experiment (FIXED)")
     print(f"  Episodes: {args.num_episodes}")
-    print(
-        f"  Seeds: {args.seed_start} to {args.seed_start + args.num_episodes - 1}")
+    print(f"  Seeds: {args.seed_start} to {args.seed_start + args.num_episodes - 1}")
     print(f"  Output: {output_dir}")
     print(f"  Progress: {'ON' if args.progress else 'OFF'}")
     print(
-        f"  Data Export: {'FULL TRACE (memory intensive)' if args.full_trace else 'COMPREHENSIVE'}")
-    print(f"\n  Phase 1 Fixes Applied:")
-    print(f"    ✓ Eligibility traces with proper synapse tracking")
-    print(f"    ✓ Biologically correct Dale's principle")
-    print(f"    ✓ Reward prediction error for dopamine")
-    print(f"    ✓ Graded dopamine-dependent learning")
+        f"  Data Export: {'FULL TRACE (memory intensive)' if args.full_trace else 'COMPREHENSIVE'}"
+    )
+    print("\n  Phase 1 Fixes Applied:")
+    print("    ✓ Eligibility traces with proper synapse tracking")
+    print("    ✓ Biologically correct Dale's principle")
+    print("    ✓ Reward prediction error for dopamine")
+    print("    ✓ Graded dopamine-dependent learning")
 
     # Estimate total experiment time
     estimated_time_per_episode = 25.0  # seconds, based on test runs
@@ -1086,7 +1043,7 @@ def run_experiment(args):
         if seconds < 60:
             return f"{seconds:.0f}s"
         elif seconds < 3600:
-            return f"{seconds//60:.0f}m{seconds % 60:.0f}s"
+            return f"{seconds // 60:.0f}m{seconds % 60:.0f}s"
         else:
             hours = seconds // 3600
             minutes = (seconds % 3600) // 60
@@ -1114,19 +1071,21 @@ def run_experiment(args):
         bar = "█" * filled + "░" * (bar_width - filled)
 
         # Update line
-        line = (f"\r  {bar} {progress_pct:5.1f}% | "
-                f"{step:,}/{max_steps:,} | "
-                f"{steps_per_sec:.0f} steps/s | "
-                f"ETA: {eta:.0f}s | "
-                f"R: {rewards} | P: {proximity}")
+        line = (
+            f"\r  {bar} {progress_pct:5.1f}% | "
+            f"{step:,}/{max_steps:,} | "
+            f"{steps_per_sec:.0f} steps/s | "
+            f"ETA: {eta:.0f}s | "
+            f"R: {rewards} | P: {proximity}"
+        )
 
-        print(line, end='', flush=True)
+        print(line, end="", flush=True)
 
     # Run episodes
     for i in range(args.num_episodes):
         seed = args.seed_start + i
 
-        print(f"\n📊 Episode {i+1}/{args.num_episodes} (Seed {seed})")
+        print(f"\n📊 Episode {i + 1}/{args.num_episodes} (Seed {seed})")
         episode_start = time.time()
 
         # Create episode directory if full trace
@@ -1137,8 +1096,11 @@ def run_experiment(args):
 
         # Run episode with progress
         episode_data = run_episode(
-            seed, progress_callback if args.progress else None,
-            full_trace=args.full_trace, episode_dir=episode_dir)
+            seed,
+            progress_callback if args.progress else None,
+            full_trace=args.full_trace,
+            episode_dir=episode_dir,
+        )
 
         if args.progress:
             print()  # New line after progress
@@ -1148,79 +1110,81 @@ def run_experiment(args):
         summaries.append(summary)
 
         # Episode summary
-        print(f"  ✅ Complete: {summary['rewards']} rewards, "
-              f"{summary['proximity_rewards']} proximity, "
-              f"{summary['coverage']} positions, "
-              f"{summary['time_seconds']:.1f}s")
+        print(
+            f"  ✅ Complete: {summary['rewards']} rewards, "
+            f"{summary['proximity_rewards']} proximity, "
+            f"{summary['coverage']} positions, "
+            f"{summary['time_seconds']:.1f}s"
+        )
 
         # Experiment progress
         if i < args.num_episodes - 1:
             total_elapsed = time.time() - experiment_start
             avg_time = total_elapsed / (i + 1)
             eta = avg_time * (args.num_episodes - i - 1)
-            print(f"  📈 Experiment: {(i+1)/args.num_episodes*100:.0f}% | "
-                  f"Avg: {avg_time:.1f}s | ETA: {eta:.0f}s")
+            print(
+                f"  📈 Experiment: {(i + 1) / args.num_episodes * 100:.0f}% | "
+                f"Avg: {avg_time:.1f}s | ETA: {eta:.0f}s"
+            )
 
     # Save experiment summary
     experiment_time = time.time() - experiment_start
 
     # Calculate statistics
     summary_df = {
-        'episodes': args.num_episodes,
-        'total_time_seconds': experiment_time,
-        'avg_time_per_episode': experiment_time / args.num_episodes,
-        'avg_rewards': np.mean([s['rewards'] for s in summaries]),
-        'std_rewards': np.std([s['rewards'] for s in summaries]),
-        'avg_proximity': np.mean([s['proximity_rewards'] for s in summaries]),
-        'std_proximity': np.std([s['proximity_rewards'] for s in summaries]),
-        'avg_coverage': np.mean([s['coverage'] for s in summaries]),
-        'std_coverage': np.std([s['coverage'] for s in summaries]),
-        'episodes_summary': summaries
+        "episodes": args.num_episodes,
+        "total_time_seconds": experiment_time,
+        "avg_time_per_episode": experiment_time / args.num_episodes,
+        "avg_rewards": np.mean([s["rewards"] for s in summaries]),
+        "std_rewards": np.std([s["rewards"] for s in summaries]),
+        "avg_proximity": np.mean([s["proximity_rewards"] for s in summaries]),
+        "std_proximity": np.std([s["proximity_rewards"] for s in summaries]),
+        "avg_coverage": np.mean([s["coverage"] for s in summaries]),
+        "std_coverage": np.std([s["coverage"] for s in summaries]),
+        "episodes_summary": summaries,
     }
 
-    with open(os.path.join(output_dir, 'experiment_summary.json'), 'w') as f:
+    with open(os.path.join(output_dir, "experiment_summary.json"), "w") as f:
         json.dump(summary_df, f, indent=2)
 
     # Create simple CSV for quick analysis
     import csv
-    with open(os.path.join(output_dir, 'results.csv'), 'w', newline='') as f:
+
+    with open(os.path.join(output_dir, "results.csv"), "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=summaries[0].keys())
         writer.writeheader()
         writer.writerows(summaries)
 
-    print(f"\n✅ Experiment Complete!")
+    print("\n✅ Experiment Complete!")
     print(f"  Total time: {experiment_time:.1f}s")
-    print(
-        f"  Avg rewards: {summary_df['avg_rewards']:.1f} ± {summary_df['std_rewards']:.1f}")
-    print(
-        f"  Avg proximity: {summary_df['avg_proximity']:.1f} ± {summary_df['std_proximity']:.1f}")
-    print(
-        f"  Avg coverage: {summary_df['avg_coverage']:.0f} ± {summary_df['std_coverage']:.0f}")
+    print(f"  Avg rewards: {summary_df['avg_rewards']:.1f} ± {summary_df['std_rewards']:.1f}")
+    print(f"  Avg proximity: {summary_df['avg_proximity']:.1f} ± {summary_df['std_proximity']:.1f}")
+    print(f"  Avg coverage: {summary_df['avg_coverage']:.0f} ± {summary_df['std_coverage']:.0f}")
     print(f"  Data saved to: {output_dir}")
-    print(f"\n📁 Output Structure:")
+    print("\n📁 Output Structure:")
     print(f"  {output_dir}/")
-    print(f"    ├── config.json              # Full experiment configuration")
-    print(f"    ├── experiment_summary.json  # Statistical summary")
-    print(f"    ├── results.csv              # Quick-access results table")
-    print(f"    └── episode_XXX/             # Per-episode data")
-    print(f"        ├── metadata.json        # Episode metadata")
-    print(f"        ├── trajectory.npz       # Position, action, reward data")
-    print(f"        ├── neural_dynamics.npz  # Spike trains, membrane potentials, TD errors")
-    print(f"        ├── weight_evolution.pkl.gz # Weight snapshots over time")
-    print(f"        ├── environment.npz      # Reward positions, grid info")
-    print(f"        └── network_properties.npz # E/I identity, connectivity")
+    print("    ├── config.json              # Full experiment configuration")
+    print("    ├── experiment_summary.json  # Statistical summary")
+    print("    ├── results.csv              # Quick-access results table")
+    print("    └── episode_XXX/             # Per-episode data")
+    print("        ├── metadata.json        # Episode metadata")
+    print("        ├── trajectory.npz       # Position, action, reward data")
+    print("        ├── neural_dynamics.npz  # Spike trains, membrane potentials, TD errors")
+    print("        ├── weight_evolution.pkl.gz # Weight snapshots over time")
+    print("        ├── environment.npz      # Reward positions, grid info")
+    print("        └── network_properties.npz # E/I identity, connectivity")
     if args.full_trace:
-        print(f"        # Full trace files (when --full-trace is used):")
-        print(f"        ├── reward_states.dat    # Active rewards at each timestep")
-        print(f"        ├── spike_trains_full.dat # Complete spike trains")
-        print(f"        ├── voltages_full.dat    # Complete membrane potentials")
-        print(f"        └── weight_changes.csv   # Detailed synaptic updates")
+        print("        # Full trace files (when --full-trace is used):")
+        print("        ├── reward_states.dat    # Active rewards at each timestep")
+        print("        ├── spike_trains_full.dat # Complete spike trains")
+        print("        ├── voltages_full.dat    # Complete membrane potentials")
+        print("        └── weight_changes.csv   # Detailed synaptic updates")
 
 
 def main():
     """Main entry point with argument parsing"""
     parser = argparse.ArgumentParser(
-        description='Phase 0.4 Research Script - Optimized SNN Learning (FIXED)',
+        description="Phase 0.4 Research Script - Optimized SNN Learning (FIXED)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -1235,21 +1199,33 @@ Examples:
 
   # Silent high-performance run
   python phase04_research_fixed.py -n 50 --no-progress
-        """
+        """,
     )
 
-    parser.add_argument('-n', '--num-episodes', type=int, default=3,
-                        help='Number of episodes to run (default: 3)')
-    parser.add_argument('-s', '--seed-start', type=int, default=0,
-                        help='Starting seed value (default: 0)')
-    parser.add_argument('-o', '--output-dir', type=str, default='logs',
-                        help='Output directory (default: logs)')
-    parser.add_argument('--progress', action='store_true', default=True,
-                        help='Show progress bars (default: True)')
-    parser.add_argument('--no-progress', action='store_false', dest='progress',
-                        help='Disable progress bars for maximum performance')
-    parser.add_argument('--full-trace', action='store_true', default=False,
-                        help='Save complete neural dynamics for every timestep (memory intensive)')
+    parser.add_argument(
+        "-n", "--num-episodes", type=int, default=3, help="Number of episodes to run (default: 3)"
+    )
+    parser.add_argument(
+        "-s", "--seed-start", type=int, default=0, help="Starting seed value (default: 0)"
+    )
+    parser.add_argument(
+        "-o", "--output-dir", type=str, default="logs", help="Output directory (default: logs)"
+    )
+    parser.add_argument(
+        "--progress", action="store_true", default=True, help="Show progress bars (default: True)"
+    )
+    parser.add_argument(
+        "--no-progress",
+        action="store_false",
+        dest="progress",
+        help="Disable progress bars for maximum performance",
+    )
+    parser.add_argument(
+        "--full-trace",
+        action="store_true",
+        default=False,
+        help="Save complete neural dynamics for every timestep (memory intensive)",
+    )
 
     args = parser.parse_args()
 

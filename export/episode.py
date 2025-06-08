@@ -2,16 +2,15 @@
 """Manages data storage for a single episode with high performance."""
 
 import threading
-from collections import defaultdict
 from datetime import datetime
-from typing import Dict, Any, Optional, Tuple, List
+from typing import Any, Dict, Optional, Tuple
 
 import h5py
 import numpy as np
 
+from .performance import AdaptiveCompressor, AsyncWriteQueue, PerformanceProfiler, RealtimeStats
+from .schema import validate_timestep_data
 from .utils import ensure_numpy, optimize_jax_conversion
-from .schema import validate_timestep_data, validate_weight_change
-from .performance import AsyncWriteQueue, AdaptiveCompressor, RealtimeStats, PerformanceProfiler
 
 # Global HDF5 lock for thread safety across all exporter instances
 _HDF5_LOCK = threading.RLock()

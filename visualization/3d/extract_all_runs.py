@@ -3,6 +3,7 @@
 
 import json
 from pathlib import Path
+
 from extract_run_data import extract_and_save_trajectory
 
 
@@ -10,7 +11,7 @@ def extract_all_runs():
     """Extract trajectory data from all runs in the index."""
 
     # Load runs index
-    with open("visualization/3d/runs_index.json", "r") as f:
+    with open("visualization/3d/runs_index.json") as f:
         index = json.load(f)
 
     runs = index["runs"]
@@ -36,7 +37,7 @@ def extract_all_runs():
             if extract_and_save_trajectory(h5_path, output_filename):
                 extracted += 1
             else:
-                print(f"  Failed to extract")
+                print("  Failed to extract")
         except Exception as e:
             print(f"  Error: {e}")
 

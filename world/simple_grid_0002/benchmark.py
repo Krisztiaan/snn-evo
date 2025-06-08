@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 """Benchmark JAX-optimized grid world performance."""
 
-from world.simple_grid_0001.types import WorldConfig
-from world.simple_grid_0002 import SimpleGridWorld as JAXWorld
-from world.simple_grid_0001 import SimpleGridWorld as BaselineWorld
-import time
-import jax
-import jax.numpy as jnp
-from jax import random
+import os
 
 # Set up imports
 import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(
-    os.path.dirname(os.path.abspath(__file__)))))
+import time
+
+import jax
+from jax import random
+
+from world.simple_grid_0001 import SimpleGridWorld as BaselineWorld
+from world.simple_grid_0001.types import WorldConfig
+from world.simple_grid_0002 import SimpleGridWorld as JAXWorld
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 
 def benchmark_world(world_class, config, n_steps=1000, warmup=True):
@@ -51,10 +52,10 @@ def benchmark_world(world_class, config, n_steps=1000, warmup=True):
     total_time = reset_time + sum(step_times)
 
     return {
-        'reset_time': reset_time,
-        'avg_step_time': avg_step_time,
-        'total_time': total_time,
-        'steps_per_second': 1.0 / avg_step_time
+        "reset_time": reset_time,
+        "avg_step_time": avg_step_time,
+        "total_time": total_time,
+        "steps_per_second": 1.0 / avg_step_time,
     }
 
 
@@ -71,38 +72,28 @@ def main():
         print(f"\n📊 Grid Size: {size}x{size}, Rewards: {n_rewards}")
         print("-" * 50)
 
-        config = WorldConfig(
-            grid_size=size,
-            n_rewards=n_rewards,
-            max_timesteps=10000
-        )
+        config = WorldConfig(grid_size=size, n_rewards=n_rewards, max_timesteps=10000)
 
         # Benchmark baseline
         print("Baseline world:")
-        baseline_results = benchmark_world(
-            BaselineWorld, config, n_steps=1000, warmup=False)
-        print(f"  Reset time: {baseline_results['reset_time']*1000:.2f}ms")
-        print(
-            f"  Avg step time: {baseline_results['avg_step_time']*1000:.2f}ms")
+        baseline_results = benchmark_world(BaselineWorld, config, n_steps=1000, warmup=False)
+        print(f"  Reset time: {baseline_results['reset_time'] * 1000:.2f}ms")
+        print(f"  Avg step time: {baseline_results['avg_step_time'] * 1000:.2f}ms")
         print(f"  Steps/second: {baseline_results['steps_per_second']:.0f}")
 
         # Benchmark JAX
         print("\nJAX world (JIT compiled):")
-        jax_results = benchmark_world(
-            JAXWorld, config, n_steps=1000, warmup=True)
-        print(f"  Reset time: {jax_results['reset_time']*1000:.2f}ms")
-        print(f"  Avg step time: {jax_results['avg_step_time']*1000:.2f}ms")
+        jax_results = benchmark_world(JAXWorld, config, n_steps=1000, warmup=True)
+        print(f"  Reset time: {jax_results['reset_time'] * 1000:.2f}ms")
+        print(f"  Avg step time: {jax_results['avg_step_time'] * 1000:.2f}ms")
         print(f"  Steps/second: {jax_results['steps_per_second']:.0f}")
 
         # Calculate speedup
-        reset_speedup = baseline_results['reset_time'] / \
-            jax_results['reset_time']
-        step_speedup = baseline_results['avg_step_time'] / \
-            jax_results['avg_step_time']
-        total_speedup = baseline_results['total_time'] / \
-            jax_results['total_time']
+        reset_speedup = baseline_results["reset_time"] / jax_results["reset_time"]
+        step_speedup = baseline_results["avg_step_time"] / jax_results["avg_step_time"]
+        total_speedup = baseline_results["total_time"] / jax_results["total_time"]
 
-        print(f"\n🚀 Speedup:")
+        print("\n🚀 Speedup:")
         print(f"  Reset: {reset_speedup:.1f}x faster")
         print(f"  Steps: {step_speedup:.1f}x faster")
         print(f"  Total: {total_speedup:.1f}x faster")
@@ -133,21 +124,22 @@ def main():
     _ = world.step(state, 0, random.PRNGKey(3))
     second_step = time.time() - start
 
-    print(f"Reset - First call (with JIT): {first_reset*1000:.2f}ms")
-    print(f"Reset - Second call (compiled): {second_reset*1000:.2f}ms")
-    print(f"Step - First call (with JIT): {first_step*1000:.2f}ms")
-    print(f"Step - Second call (compiled): {second_step*1000:.2f}ms")
+    print(f"Reset - First call (with JIT): {first_reset * 1000:.2f}ms")
+    print(f"Reset - Second call (compiled): {second_reset * 1000:.2f}ms")
+    print(f"Step - First call (with JIT): {first_step * 1000:.2f}ms")
+    print(f"Step - Second call (compiled): {second_step * 1000:.2f}ms")
 
-    print(f"\nJIT compilation overhead:")
-    print(f"  Reset: {(first_reset - second_reset)*1000:.2f}ms")
-    print(f"  Step: {(first_step - second_step)*1000:.2f}ms")
+    print("\nJIT compilation overhead:")
+    print(f"  Reset: {(first_reset - second_reset) * 1000:.2f}ms")
+    print(f"  Step: {(first_step - second_step) * 1000:.2f}ms")
 
     # Memory efficiency test
     print("\n\n💾 Memory Efficiency")
     print("-" * 50)
 
-    import psutil
     import gc
+
+    import psutil
 
     process = psutil.Process()
 
@@ -163,12 +155,11 @@ def main():
     # JAX world
     gc.collect()
     jax_world = JAXWorld(big_config)
-    jax_world_mem = process.memory_info().rss / 1024 / 1024 - \
-        baseline_mem - baseline_world_mem
+    jax_world_mem = process.memory_info().rss / 1024 / 1024 - baseline_mem - baseline_world_mem
 
     print(f"Baseline world memory: {baseline_world_mem:.1f} MB")
     print(f"JAX world memory: {jax_world_mem:.1f} MB")
-    print(f"Memory efficiency: {baseline_world_mem/jax_world_mem:.1f}x")
+    print(f"Memory efficiency: {baseline_world_mem / jax_world_mem:.1f}x")
 
     print("\n" + "=" * 60)
     print("✅ Benchmark complete!")

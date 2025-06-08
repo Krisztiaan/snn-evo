@@ -2,7 +2,7 @@
 """Type definitions for simple grid world."""
 
 from typing import NamedTuple, Tuple
-import jax.numpy as jnp
+
 from jax import Array
 
 
@@ -11,6 +11,7 @@ class WorldState(NamedTuple):
 
     All state is immutable and functional for JAX compatibility.
     """
+
     # Agent state
     agent_pos: Tuple[int, int]  # (x, y) position
 
@@ -25,11 +26,13 @@ class WorldState(NamedTuple):
 
 class Observation(NamedTuple):
     """What the agent sees."""
+
     gradient: float  # Distance-based signal to nearest reward (0-1)
 
 
 class StepResult(NamedTuple):
     """Result of taking a step in the world."""
+
     state: WorldState
     observation: Observation
     reward: float
@@ -38,6 +41,7 @@ class StepResult(NamedTuple):
 
 class WorldConfig(NamedTuple):
     """Configuration for the grid world."""
+
     grid_size: int = 100
     n_rewards: int = 300
     max_timesteps: int = 50000

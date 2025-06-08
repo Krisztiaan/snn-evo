@@ -3,16 +3,18 @@
 """Configuration for the Phase 0.7 SNN Agent."""
 
 from typing import NamedTuple
+
 from world.simple_grid_0001 import WorldConfig
 
 
 class NetworkParams(NamedTuple):
     """Network parameters with specialized neuron populations."""
+
     # Architecture
     NUM_MAIN_NEURONS: int = 256
     NUM_INPUT_NEURONS: int = 16  # Encodes gradient via firing rate
-    NUM_CLOCK_NEURONS: int = 4   # Provide intrinsic rhythmic drive
-    NUM_MOTOR_NEURONS: int = 6   # move_en, move_fwd, move_bwd, turn_en, turn_l, turn_r
+    NUM_CLOCK_NEURONS: int = 4  # Provide intrinsic rhythmic drive
+    NUM_MOTOR_NEURONS: int = 6  # move_en, move_fwd, move_bwd, turn_en, turn_l, turn_r
     EXCITATORY_RATIO: float = 0.8
 
     # Neuron Dynamics
@@ -24,7 +26,7 @@ class NetworkParams(NamedTuple):
 
     # Rate-Coding and Clock
     MAX_INPUT_RATE_HZ: float = 100.0  # Max firing rate for input neurons at gradient=1
-    CLOCK_RATE_HZ: float = 10.0       # Firing rate of clock neurons
+    CLOCK_RATE_HZ: float = 10.0  # Firing rate of clock neurons
 
     # Homeostasis
     TARGET_RATE_HZ: float = 5.0
@@ -51,7 +53,7 @@ class NetworkParams(NamedTuple):
 
     # Action Selection
     DECISION_WINDOW: int = 100  # ms, accumulate motor spikes over this window
-    ENABLE_THRESHOLD: int = 5   # Min spikes in window to enable move/turn
+    ENABLE_THRESHOLD: int = 5  # Min spikes in window to enable move/turn
 
     # Connectivity (probabilities)
     P_IN_MAIN: float = 0.5
@@ -69,6 +71,7 @@ class NetworkParams(NamedTuple):
 
 class ExperimentConfig(NamedTuple):
     """Configuration for the experiment run."""
+
     n_episodes: int = 3
     seed: int = 42
     export_dir: str = "experiments/phase_0_7"
@@ -77,6 +80,7 @@ class ExperimentConfig(NamedTuple):
 
 class SnnAgentConfig(NamedTuple):
     """Master configuration for the SNN agent and experiment."""
+
     world_config: WorldConfig = WorldConfig()
     network_params: NetworkParams = NetworkParams()
     exp_config: ExperimentConfig = ExperimentConfig()

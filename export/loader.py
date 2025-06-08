@@ -1,12 +1,13 @@
 # keywords: [loader, hdf5, data, analysis, simple]
 """Simple data loading utilities for HDF5 exports."""
 
-import h5py
-import numpy as np
-from pathlib import Path
-from typing import Dict, Any, List, Optional, Union
 import json
 import zlib
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
+
+import h5py
+import numpy as np
 
 
 class ExperimentLoader:

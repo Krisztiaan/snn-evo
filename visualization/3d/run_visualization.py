@@ -2,12 +2,11 @@
 # keywords: [unified runner, visualization server, experiment watcher]
 """Unified script to run the HDF5-based visualization server."""
 
-import os
+import subprocess
 import sys
 import time
-import subprocess
-from pathlib import Path
 import webbrowser
+from pathlib import Path
 from threading import Thread
 
 # Add parent directories to path

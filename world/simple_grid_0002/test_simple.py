@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Simple test for JAX JIT compilation debugging."""
 
+import os
+import sys
+
+import jax.numpy as jnp
+from jax import random
+
 from world.simple_grid_0001.types import WorldConfig
 from world.simple_grid_0002.world import SimpleGridWorld
-from jax import random
-import jax.numpy as jnp
-import jax
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(
-    os.path.dirname(os.path.abspath(__file__)))))
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 
 def test_basic():
@@ -27,13 +28,14 @@ def test_basic():
     key = random.PRNGKey(0)
     try:
         state, obs = world.reset(key)
-        print(f"✓ Reset successful")
+        print("✓ Reset successful")
         print(f"  Agent position: {state.agent_pos}")
         print(f"  Reward positions shape: {state.reward_positions.shape}")
         print(f"  Initial gradient: {obs.gradient}")
     except Exception as e:
         print(f"✗ Reset failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -41,12 +43,13 @@ def test_basic():
     print("\nTesting step...")
     try:
         result = world.step(state, 0, random.PRNGKey(1))
-        print(f"✓ Step successful")
+        print("✓ Step successful")
         print(f"  New position: {result.state.agent_pos}")
         print(f"  Reward: {result.reward}")
     except Exception as e:
         print(f"✗ Step failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -72,6 +75,7 @@ def test_jit_methods():
     except Exception as e:
         print(f"✗ Failed: {e}")
         import traceback
+
         traceback.print_exc()
 
     # Test _calculate_distances
@@ -84,6 +88,7 @@ def test_jit_methods():
     except Exception as e:
         print(f"✗ Failed: {e}")
         import traceback
+
         traceback.print_exc()
 
 

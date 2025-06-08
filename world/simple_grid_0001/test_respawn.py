@@ -1,23 +1,17 @@
 # keywords: [test respawn functionality, reward respawning]
 """Test the reward respawning functionality."""
 
-import jax
 import jax.numpy as jnp
 from jax import random
 
-from .world import SimpleGridWorld
 from .types import WorldConfig
+from .world import SimpleGridWorld
 
 
 def test_respawn():
     """Test that rewards respawn at farthest position when collected."""
     # Small grid for easier testing
-    config = WorldConfig(
-        grid_size=10,
-        n_rewards=3,
-        max_timesteps=100,
-        reward_value=10.0
-    )
+    config = WorldConfig(grid_size=10, n_rewards=3, max_timesteps=100, reward_value=10.0)
     world = SimpleGridWorld(config)
 
     # Get metadata
@@ -36,16 +30,14 @@ def test_respawn():
     # Move agent one step below first reward so we can step into it
     target_reward_idx = 0
     target_pos = state.reward_positions[target_reward_idx]
-    state = state._replace(agent_pos=(
-        int(target_pos[0]), int(target_pos[1]) + 1))
+    state = state._replace(agent_pos=(int(target_pos[0]), int(target_pos[1]) + 1))
 
-    print(
-        f"\nAgent positioned at {state.agent_pos}, reward at {tuple(target_pos.tolist())}")
+    print(f"\nAgent positioned at {state.agent_pos}, reward at {tuple(target_pos.tolist())}")
 
     # Step up (action 0) to collect the reward
     result = world.step(state, action=0)  # Move up to collect
 
-    print(f"\nAfter step:")
+    print("\nAfter step:")
     print(f"Agent now at: {result.state.agent_pos}")
     print(f"Reward collected: {result.reward}")
     print(f"New reward positions:\n{result.state.reward_positions}")

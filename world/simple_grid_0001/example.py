@@ -1,7 +1,6 @@
 # keywords: [grid world example, simple usage, random agent]
 """Example usage of the simple grid world."""
 
-import jax
 import jax.numpy as jnp
 from jax import random
 
@@ -12,11 +11,7 @@ def random_agent(key: random.PRNGKey, n_steps: int = 1000):
     """Run a random agent in the grid world."""
     # Create world with custom config
     config = WorldConfig(
-        grid_size=50,
-        n_rewards=50,
-        max_timesteps=n_steps,
-        reward_value=10.0,
-        proximity_reward=0.1
+        grid_size=50, n_rewards=50, max_timesteps=n_steps, reward_value=10.0, proximity_reward=0.1
     )
     world = SimpleGridWorld(config)
 
@@ -49,16 +44,16 @@ def random_agent(key: random.PRNGKey, n_steps: int = 1000):
             total_reward += result.reward
             if result.reward >= config.reward_value:
                 print(
-                    f"Step {step}: Collected reward! Total: {total_reward} (respawned at farthest position)")
+                    f"Step {step}: Collected reward! Total: {total_reward} (respawned at farthest position)"
+                )
 
         if result.done:
             print(f"Episode finished at step {step}")
             break
 
-    print(f"\nFinal stats:")
+    print("\nFinal stats:")
     print(f"Total reward: {state.total_reward}")
-    print(
-        f"Rewards collected: {jnp.sum(state.reward_collected)}/{config.n_rewards}")
+    print(f"Rewards collected: {jnp.sum(state.reward_collected)}/{config.n_rewards}")
     print(f"Final position: {state.agent_pos}")
 
     return state
@@ -103,8 +98,7 @@ def gradient_following_agent(key: random.PRNGKey, n_steps: int = 1000):
         if result.done:
             break
 
-    print(
-        f"Collected {jnp.sum(state.reward_collected)}/{config.n_rewards} rewards")
+    print(f"Collected {jnp.sum(state.reward_collected)}/{config.n_rewards} rewards")
     print(f"Path length: {len(path)}")
 
     return state, path
@@ -118,7 +112,7 @@ if __name__ == "__main__":
     key, subkey = random.split(key)
     random_agent(subkey)
 
-    print("\n" + "="*50 + "\n")
+    print("\n" + "=" * 50 + "\n")
 
     # Run gradient-following agent
     print("=== Gradient-Following Agent ===")

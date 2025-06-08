@@ -9,13 +9,13 @@ a properly scaled input signal, and functional metaplasticity, resulting
 in an active, learning agent.
 """
 
-from .config import SnnAgentConfig, NetworkParams, ExperimentConfig
 from .agent import SnnAgent
+from .config import ExperimentConfig, NetworkParams, SnnAgentConfig
 
 __version__ = "0.6.0"
 __all__ = [
+    "ExperimentConfig",
+    "NetworkParams",
     "SnnAgent",
     "SnnAgentConfig",
-    "NetworkParams",
-    "ExperimentConfig",
 ]

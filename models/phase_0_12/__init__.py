@@ -3,6 +3,6 @@
 """Phase 0.12: Fixed learning dynamics for actual progress."""
 
 from .agent import SnnAgent
-from .config import SnnAgentConfig, NetworkParams, ExperimentConfig
+from .config import ExperimentConfig, NetworkParams, SnnAgentConfig
 
-__all__ = ['SnnAgent', 'SnnAgentConfig', 'NetworkParams', 'ExperimentConfig']
+__all__ = ["ExperimentConfig", "NetworkParams", "SnnAgent", "SnnAgentConfig"]

@@ -9,6 +9,6 @@ phases.
 """
 
 from .agent import SnnAgent
-from .config import SnnAgentConfig, NetworkParams, ExperimentConfig
+from .config import ExperimentConfig, NetworkParams, SnnAgentConfig
 
-__all__ = ['SnnAgent', 'SnnAgentConfig', 'NetworkParams', 'ExperimentConfig']
+__all__ = ["ExperimentConfig", "NetworkParams", "SnnAgent", "SnnAgentConfig"]

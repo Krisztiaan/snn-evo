@@ -2,7 +2,8 @@
 """Utility functions for data export."""
 
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict
+
 import numpy as np
 
 try:

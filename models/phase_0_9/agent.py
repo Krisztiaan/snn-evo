@@ -9,17 +9,19 @@ Key improvements over 0.8:
 3. All other improvements from phase 0.8 retained
 """
 
-from typing import Dict, Any, NamedTuple, Tuple, Optional
+from functools import partial
+from typing import Any, Dict, NamedTuple, Tuple
+
 import jax
 import jax.numpy as jnp
-from jax import random, jit
 import numpy as np
-from functools import partial
+from jax import jit, random
 
-from .config import SnnAgentConfig, NetworkParams
-from world.simple_grid_0001 import SimpleGridWorld, WorldState, Observation
 from export import DataExporter
+from world.simple_grid_0001 import SimpleGridWorld
+
 from .agent_vectorized import create_connectivity_vectorized
+from .config import NetworkParams, SnnAgentConfig
 
 
 class AgentState(NamedTuple):

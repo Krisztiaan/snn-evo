@@ -12,7 +12,7 @@ from .data_exporter import DataExporter
 from .episode import Episode
 
 # Import data loading utilities
-from .loader import ExperimentLoader, EpisodeData
+from .loader import EpisodeData, ExperimentLoader
 
 # Import utility functions
 from .utils import ensure_numpy
@@ -21,8 +21,8 @@ from .utils import ensure_numpy
 __all__: List[str] = [
     "DataExporter",
     "Episode",
-    "ExperimentLoader",
     "EpisodeData",
+    "ExperimentLoader",
     "ensure_numpy",
 ]
 

@@ -2,14 +2,12 @@
 """Quick performance comparison of grid world implementations."""
 
 import time
-import jax
-import jax.numpy as jnp
-from jax import random
 
+from jax import random
 from simple_grid_0001 import SimpleGridWorld as WorldV1
+from simple_grid_0001.types import WorldConfig
 from simple_grid_0002 import SimpleGridWorld as WorldV2
 from simple_grid_0003 import SimpleGridWorld as WorldV3
-from simple_grid_0001.types import WorldConfig
 
 
 def quick_benchmark(world_class, config, n_steps=1000):
@@ -41,9 +39,9 @@ def quick_benchmark(world_class, config, n_steps=1000):
     total_step_time = time.perf_counter() - start
 
     return {
-        'reset_ms': reset_time * 1000,
-        'step_us': (total_step_time / n_steps) * 1e6,
-        'steps_per_sec': n_steps / total_step_time
+        "reset_ms": reset_time * 1000,
+        "step_us": (total_step_time / n_steps) * 1e6,
+        "steps_per_sec": n_steps / total_step_time,
     }
 
 
@@ -63,16 +61,19 @@ def main():
     print(f"{'Version':<10} {'Reset (ms)':<12} {'Step (μs)':<12} {'Steps/sec':<12}")
     print("-" * 60)
     print(
-        f"{'V1':<10} {v1['reset_ms']:<12.2f} {v1['step_us']:<12.1f} {v1['steps_per_sec']:<12,.0f}")
+        f"{'V1':<10} {v1['reset_ms']:<12.2f} {v1['step_us']:<12.1f} {v1['steps_per_sec']:<12,.0f}"
+    )
     print(
-        f"{'V2':<10} {v2['reset_ms']:<12.2f} {v2['step_us']:<12.1f} {v2['steps_per_sec']:<12,.0f}")
+        f"{'V2':<10} {v2['reset_ms']:<12.2f} {v2['step_us']:<12.1f} {v2['steps_per_sec']:<12,.0f}"
+    )
     print(
-        f"{'V3':<10} {v3['reset_ms']:<12.2f} {v3['step_us']:<12.1f} {v3['steps_per_sec']:<12,.0f}")
+        f"{'V3':<10} {v3['reset_ms']:<12.2f} {v3['step_us']:<12.1f} {v3['steps_per_sec']:<12,.0f}"
+    )
 
     print("\n🎯 Speedup:")
-    print(f"  V2 vs V1: {v1['step_us']/v2['step_us']:.1f}x")
-    print(f"  V3 vs V1: {v1['step_us']/v3['step_us']:.1f}x")
-    print(f"  V3 vs V2: {v2['step_us']/v3['step_us']:.1f}x")
+    print(f"  V2 vs V1: {v1['step_us'] / v2['step_us']:.1f}x")
+    print(f"  V3 vs V1: {v1['step_us'] / v3['step_us']:.1f}x")
+    print(f"  V3 vs V2: {v2['step_us'] / v3['step_us']:.1f}x")
 
 
 if __name__ == "__main__":

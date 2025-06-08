@@ -2,6 +2,7 @@
 """Example usage of the neural network data export module."""
 
 import numpy as np
+
 from export import DataExporter, ExperimentLoader
 
 
@@ -33,7 +34,7 @@ def main():
             "network_type": "feedforward",
         }
         exporter.save_config(config)
-        print(f"   - Saved configuration")
+        print("   - Saved configuration")
 
         # Save network structure
         neurons = {
@@ -116,7 +117,7 @@ def main():
                         },
                     )
 
-    print(f"\n   Experiment complete!")
+    print("\n   Experiment complete!")
 
     # 2. Load and analyze the data
     print("\n2. Loading and analyzing exported data...\n")
@@ -140,7 +141,7 @@ def main():
 
         # Get configuration
         config = loader.get_config()
-        print(f"\n   Configuration:")
+        print("\n   Configuration:")
         for key, value in config.items():
             print(f"     - {key}: {value}")
 
@@ -149,7 +150,7 @@ def main():
         print(f"\n   Found {len(episodes)} episodes: {episodes}")
 
         # Load first episode
-        print(f"\n   Loading episode 0...")
+        print("\n   Loading episode 0...")
         episode_data = loader.get_episode(0)
 
         # Get neural states
@@ -189,7 +190,7 @@ def main():
 
         # Get metadata
         episode_meta = episode_data.get_metadata()
-        print(f"\n   Episode summary:")
+        print("\n   Episode summary:")
         print(f"     - Duration: {episode_meta['total_timesteps']} timesteps")
         print(f"     - Total spikes: {episode_meta.get('total_spikes', 0)}")
         print(f"     - Total reward: {episode_meta.get('total_reward', 0)}")

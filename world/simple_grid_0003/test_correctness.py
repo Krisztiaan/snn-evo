@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Test correctness of ultra-optimized grid world implementation."""
 
+import os
+import sys
+
+import jax.numpy as jnp
+from jax import random
 from simple_grid_0001.types import WorldConfig
 from simple_grid_0003 import SimpleGridWorld
-from jax import random
-import jax.numpy as jnp
-import jax
-import sys
-import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 

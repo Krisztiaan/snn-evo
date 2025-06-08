@@ -2,11 +2,12 @@
 """Simple grid world implementation with JAX optimization."""
 
 from typing import Tuple
+
 import jax
 import jax.numpy as jnp
-from jax import random, jit, Array
+from jax import Array, random
 
-from .types import WorldState, Observation, StepResult, WorldConfig
+from .types import Observation, StepResult, WorldConfig, WorldState
 
 
 class SimpleGridWorld:

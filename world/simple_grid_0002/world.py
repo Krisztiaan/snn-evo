@@ -1,13 +1,13 @@
 # keywords: [grid world, jax environment, optimized, jit compiled, static shapes]
 """Fully JAX-compatible grid world with static shapes and JIT compilation."""
 
+from functools import partial
 from typing import Tuple
+
 import jax
 import jax.numpy as jnp
-from jax import random, jit, Array
-from functools import partial
-
-from simple_grid_0001.types import WorldState, Observation, StepResult, WorldConfig
+from jax import Array, jit, random
+from simple_grid_0001.types import Observation, StepResult, WorldConfig, WorldState
 
 
 class SimpleGridWorld:

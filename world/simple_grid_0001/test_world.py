@@ -20,10 +20,8 @@ def test_basic_functionality():
     state, obs = world.reset(key)
 
     assert state.agent_pos == (5, 5), "Agent should start at center"
-    assert state.reward_positions.shape == (
-        5, 2), "Should have 5 reward positions"
-    assert jnp.all(
-        ~state.reward_collected), "No rewards should be collected initially"
+    assert state.reward_positions.shape == (5, 2), "Should have 5 reward positions"
+    assert jnp.all(~state.reward_collected), "No rewards should be collected initially"
     assert state.total_reward == 0.0, "Initial reward should be 0"
     assert state.timestep == 0, "Initial timestep should be 0"
     assert 0 <= obs.gradient <= 1, "Gradient should be in [0, 1]"
@@ -50,8 +48,7 @@ def test_basic_functionality():
     # Test reward collection with respawn
     # Place agent one step away from a reward position
     reward_pos = state.reward_positions[0]
-    state_near_reward = state._replace(agent_pos=(
-        int(reward_pos[0]), int(reward_pos[1]) + 1))
+    state_near_reward = state._replace(agent_pos=(int(reward_pos[0]), int(reward_pos[1]) + 1))
 
     # Step into the reward
     result = world.step(state_near_reward, action=0)  # Move up
@@ -62,12 +59,12 @@ def test_basic_functionality():
     # Check that reward was respawned at a different position
     old_pos = state.reward_positions[0]
     new_pos = result.state.reward_positions[0]
-    assert not jnp.array_equal(
-        old_pos, new_pos), "Reward should respawn at different position"
+    assert not jnp.array_equal(old_pos, new_pos), "Reward should respawn at different position"
 
     # All rewards should still be uncollected (because of respawn)
-    assert jnp.all(
-        ~result.state.reward_collected), "All rewards should be uncollected after respawn"
+    assert jnp.all(~result.state.reward_collected), (
+        "All rewards should be uncollected after respawn"
+    )
 
     print("✓ Reward collection and respawn works correctly")
 
@@ -86,6 +83,7 @@ def test_jax_compilation():
 
     # Time uncompiled version
     import time
+
     start = time.time()
     for _ in range(100):
         result = world.step(state, 0)
@@ -107,7 +105,7 @@ def test_jax_compilation():
 
     print(f"Uncompiled: {uncompiled_time:.4f}s")
     print(f"Compiled: {compiled_time:.4f}s")
-    print(f"Speedup: {uncompiled_time/compiled_time:.1f}x")
+    print(f"Speedup: {uncompiled_time / compiled_time:.1f}x")
 
     print("✓ JAX compilation works")
 

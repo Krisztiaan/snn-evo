@@ -1,7 +1,6 @@
 """Phase 0.11: Optimized SNN Agent with JIT compilation and performance improvements."""
 
-from .agent import SnnAgent, OptimizedSnnAgent
-from .config import SnnAgentConfig, NetworkParams, ExperimentConfig
+from .agent import OptimizedSnnAgent, SnnAgent
+from .config import ExperimentConfig, NetworkParams, SnnAgentConfig
 
-__all__ = ['SnnAgent', 'OptimizedSnnAgent',
-           'SnnAgentConfig', 'NetworkParams', 'ExperimentConfig']
+__all__ = ["ExperimentConfig", "NetworkParams", "OptimizedSnnAgent", "SnnAgent", "SnnAgentConfig"]

@@ -2,28 +2,27 @@
 """The main DataExporter class for managing experiment data files."""
 
 import json
-import zlib
 import warnings
-from pathlib import Path
+import zlib
 from datetime import datetime
-from typing import Dict, Any, Optional, Union, List, Type
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 import h5py
 import numpy as np
 
-from .episode import Episode
-from .utils import ensure_numpy, NumpyEncoder
-from .schema import (
-    validate_network_structure,
-    SCHEMA_VERSION,
-)
+from .episode import _HDF5_LOCK, MEMORY_MAP_BLOCK_SIZE, Episode, MemoryTracker
 from .performance import (
-    AsyncWriteQueue,
     AdaptiveCompressor,
-    RealtimeStats,
+    AsyncWriteQueue,
     PerformanceProfiler,
+    RealtimeStats,
 )
-from .episode import MemoryTracker, _HDF5_LOCK, MEMORY_MAP_BLOCK_SIZE
+from .schema import (
+    SCHEMA_VERSION,
+    validate_network_structure,
+)
+from .utils import NumpyEncoder, ensure_numpy
 
 
 class DataExporter:

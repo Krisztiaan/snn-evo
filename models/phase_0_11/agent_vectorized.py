@@ -1,7 +1,8 @@
 # Vectorized connectivity creation for Phase 0_8
+from typing import Tuple
+
 import jax.numpy as jnp
 from jax import random
-from typing import Tuple
 
 
 def create_connectivity_vectorized(

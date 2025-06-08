@@ -2,16 +2,16 @@
 # keywords: [api, server, hdf5, experiment loader, visualization]
 """API server for HDF5 experiment data using ExperimentLoader."""
 
-from export.utils import NumpyEncoder
-from export.loader import ExperimentLoader, EpisodeData
 import json
-import h5py
-import numpy as np
-from pathlib import Path
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
 import sys
-import os
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
+import numpy as np
+
+from export.loader import ExperimentLoader
+from export.utils import NumpyEncoder
 
 # Add parent directories to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))

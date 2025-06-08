@@ -1,13 +1,13 @@
 # keywords: [grid world, jax environment, ultra optimized, packed positions, performance]
 """Ultra-optimized JAX grid world with packed positions and simplified algorithms."""
 
-from typing import Tuple
-import jax
-import jax.numpy as jnp
-from jax import random, jit, Array
 from functools import partial
+from typing import Tuple
 
-from ..simple_grid_0001.types import WorldState, Observation, StepResult, WorldConfig
+import jax.numpy as jnp
+from jax import Array, jit, random
+
+from world.simple_grid_0001.types import Observation, StepResult, WorldConfig, WorldState
 
 
 class SimpleGridWorld:
@@ -28,8 +28,7 @@ class SimpleGridWorld:
 
     def __init__(self, config: WorldConfig = None, grid_size: int = None):
         if config is None:
-            config = WorldConfig(
-                grid_size=grid_size if grid_size is not None else 100)
+            config = WorldConfig(grid_size=grid_size if grid_size is not None else 100)
         elif grid_size is not None:
             config = config._replace(grid_size=grid_size)
         self.config = config
@@ -45,24 +44,24 @@ class SimpleGridWorld:
         self.total_positions = self.grid_size * self.grid_size
 
         # Pre-compute spawn ring positions (deterministic, evenly spaced)
-        angles = jnp.linspace(
-            0, 2 * jnp.pi, self.n_rewards * 4, endpoint=False)
+        angles = jnp.linspace(0, 2 * jnp.pi, self.n_rewards * 4, endpoint=False)
         radius = jnp.maximum(5, self.grid_size // 4)
-        spawn_x = (self.grid_size // 2 + radius *
-                   jnp.cos(angles)).astype(jnp.int32)
-        spawn_y = (self.grid_size // 2 + radius *
-                   jnp.sin(angles)).astype(jnp.int32)
+        spawn_x = (self.grid_size // 2 + radius * jnp.cos(angles)).astype(jnp.int32)
+        spawn_y = (self.grid_size // 2 + radius * jnp.sin(angles)).astype(jnp.int32)
         spawn_x = jnp.clip(spawn_x, 0, self.grid_size - 1)
         spawn_y = jnp.clip(spawn_y, 0, self.grid_size - 1)
         self.spawn_ring = spawn_x * self.grid_size + spawn_y
 
         # Movement deltas for packed positions
-        self.move_deltas = jnp.array([
-            -self.grid_size,  # up
-            1,                 # right
-            self.grid_size,    # down
-            -1                 # left
-        ], dtype=jnp.int32)
+        self.move_deltas = jnp.array(
+            [
+                -self.grid_size,  # up
+                1,  # right
+                self.grid_size,  # down
+                -1,  # left
+            ],
+            dtype=jnp.int32,
+        )
 
         # Distance calculation constants
         self.decay_constant = self.grid_size / (2 * 4.605)
@@ -73,7 +72,7 @@ class SimpleGridWorld:
             "name": self.NAME,
             "version": self.VERSION,
             "description": self.DESCRIPTION,
-            "config": self.config._asdict()
+            "config": self.config._asdict(),
         }
 
     def reset(self, key: random.PRNGKey) -> Tuple[WorldState, Observation]:
@@ -88,8 +87,7 @@ class SimpleGridWorld:
         agent_packed = agent_pos[0] * self.grid_size + agent_pos[1]
 
         # Select evenly spaced rewards from spawn ring
-        indices = jnp.linspace(0, len(self.spawn_ring) - 1,
-                               self.n_rewards, dtype=jnp.int32)
+        indices = jnp.linspace(0, len(self.spawn_ring) - 1, self.n_rewards, dtype=jnp.int32)
         reward_positions_packed = self.spawn_ring[indices]
 
         # Unpack for compatibility with WorldState
@@ -102,12 +100,13 @@ class SimpleGridWorld:
             reward_positions=reward_positions,
             reward_collected=jnp.zeros(self.n_rewards, dtype=bool),
             total_reward=0.0,
-            timestep=0
+            timestep=0,
         )
 
         # Calculate initial observation
         observation = self._get_observation_fast(
-            agent_packed, reward_positions_packed, state.reward_collected)
+            agent_packed, reward_positions_packed, state.reward_collected
+        )
 
         return state, observation
 
@@ -125,21 +124,16 @@ class SimpleGridWorld:
         new_agent_packed = self._move_packed(agent_packed, action)
 
         # Pack reward positions
-        reward_packed = state.reward_positions[:, 0] * \
-            self.grid_size + state.reward_positions[:, 1]
+        reward_packed = state.reward_positions[:, 0] * self.grid_size + state.reward_positions[:, 1]
 
         # Check collection and calculate rewards (all vectorized)
-        at_reward = (reward_packed ==
-                     new_agent_packed) & ~state.reward_collected
+        at_reward = (reward_packed == new_agent_packed) & ~state.reward_collected
         reward = jnp.sum(at_reward.astype(jnp.float32)) * self.reward_value
 
         # Proximity rewards using packed distance
-        distances_squared = self._packed_distance_squared(
-            new_agent_packed, reward_packed)
-        near_mask = (distances_squared <
-                     25) & ~state.reward_collected & ~at_reward  # 5^2 = 25
-        proximity_reward = jnp.sum(near_mask.astype(
-            jnp.float32)) * self.proximity_reward
+        distances_squared = self._packed_distance_squared(new_agent_packed, reward_packed)
+        near_mask = (distances_squared < 25) & ~state.reward_collected & ~at_reward  # 5^2 = 25
+        proximity_reward = jnp.sum(near_mask.astype(jnp.float32)) * self.proximity_reward
 
         # Update collected
         new_collected = state.reward_collected | at_reward
@@ -149,9 +143,8 @@ class SimpleGridWorld:
         respawn_offset = jnp.sum(at_reward.astype(jnp.int32)) * 37
         new_reward_packed = jnp.where(
             at_reward,
-            (reward_packed + self.grid_size * 10 +
-             respawn_offset) % self.total_positions,
-            reward_packed
+            (reward_packed + self.grid_size * 10 + respawn_offset) % self.total_positions,
+            reward_packed,
         )
 
         # Unpack for state
@@ -172,18 +165,19 @@ class SimpleGridWorld:
             reward_positions=new_reward_positions,
             reward_collected=final_collected,
             total_reward=state.total_reward + reward + proximity_reward,
-            timestep=state.timestep + 1
+            timestep=state.timestep + 1,
         )
 
         # Get observation
         observation = self._get_observation_fast(
-            new_agent_packed, new_reward_packed, final_collected)
+            new_agent_packed, new_reward_packed, final_collected
+        )
 
         return StepResult(
             state=new_state,
             observation=observation,
             reward=reward + proximity_reward,
-            done=new_state.timestep >= self.max_timesteps
+            done=new_state.timestep >= self.max_timesteps,
         )
 
     @partial(jit, static_argnums=(0,))
@@ -219,11 +213,12 @@ class SimpleGridWorld:
         return dx * dx + dy * dy
 
     @partial(jit, static_argnums=(0,))
-    def _get_observation_fast(self, agent_packed: int, reward_packed: Array, collected: Array) -> Observation:
+    def _get_observation_fast(
+        self, agent_packed: int, reward_packed: Array, collected: Array
+    ) -> Observation:
         """Fast observation calculation."""
         # Calculate all squared distances
-        distances_squared = self._packed_distance_squared(
-            agent_packed, reward_packed)
+        distances_squared = self._packed_distance_squared(agent_packed, reward_packed)
 
         # Mask collected rewards
         masked_distances = jnp.where(~collected, distances_squared, jnp.inf)

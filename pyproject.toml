@@ -67,15 +67,64 @@ exclude = ["experiments*", "notebooks*", "tests*"]
 # --- Tool Configuration ---
 
 [tool.ruff]
+# Set the maximum line length.
 line-length = 100
-target-version = "py38"
+# Same as Black.
+# indent-width = 4
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP"]
-ignore = []
+# This is the core of the "strongly opinionated" setup.
+# We are selecting a large, curated set of rules.
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # Pyflakes
+    "I",   # isort (import sorting)
+    "UP",  # pyupgrade (modernize Python syntax)
+    "B",   # flake8-bugbear (finds likely bugs)
+    "A",   # flake8-builtins (prevents shadowing builtins)
+    "C4",  # flake8-comprehensions (more idiomatic comprehensions)
+    "SIM", # flake8-simplify (refactoring suggestions)
+    "C90", # mccabe complexity
+    "TID", # flake8-tidy-imports
+    "RUF", # Ruff-specific rules
+    "PERF",# flake8-performance (catches performance anti-patterns)
+]
+
+# Never enforce `E501` (line-too-long), as `ruff format` will handle it.
+ignore = ["E501"]
+
+# These rules are good to know but cannot be auto-fixed.
+# You will have to fix them manually after running the auto-fixer.
+unfixable = [
+    "B008",  # Function call in default argument
+    "B017",  # `assertRaises(Exception)`
+]
+
+# Allow unused arguments in specific methods (common in overrides).
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+# Set a reasonable complexity limit. Functions exceeding this should be refactored.
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+# Relax certain rules for test files, which have different patterns.
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = [
+    "S101",  # `assert` statements are fine in tests
+    "B011",  # `assert False` is used for placeholder tests
+    "F841",  # Allow unused variables (e.g., for pytest fixtures)
+]
+"export/example.py" = [
+    "T201", # Allow `print` in example files
+]
+
 
 [tool.ruff.format]
+# Use double quotes for strings.
 quote-style = "double"
+# Use a hanging indent style.
+indent-style = "space"
 
 [tool.mypy]
 python_version = "3.8"

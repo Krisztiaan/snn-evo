@@ -3,11 +3,11 @@
 
 import argparse
 from pathlib import Path
-import jax.random as random
+
 import numpy as np
 
-from .config import SnnAgentConfig, WorldConfig, NetworkParams, ExperimentConfig
 from .agent import SnnAgent
+from .config import ExperimentConfig, NetworkParams, SnnAgentConfig, WorldConfig
 
 
 def main():

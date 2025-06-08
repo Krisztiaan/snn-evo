@@ -1,14 +1,13 @@
 # keywords: [performance, async, compression, stats, profiling, optimized]
 """High-performance enhancement utilities for the export module."""
 
-import threading
 import queue
+import threading
 import time
-from typing import Dict, Any, Optional, Tuple, Callable, Deque
 from collections import deque
-import zlib
-from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from typing import Any, Callable, Deque, Dict, Optional, Tuple
 
 import numpy as np
 import psutil

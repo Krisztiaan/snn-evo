@@ -8,13 +8,13 @@ This version integrates the best features from the Phase 0.4 prototypes
 clean, configurable, and reproducible experiment package.
 """
 
-from .config import SnnAgentConfig, NetworkParams, ExperimentConfig
 from .agent import SnnAgent
+from .config import ExperimentConfig, NetworkParams, SnnAgentConfig
 
 __version__ = "0.5.0"
 __all__ = [
+    "ExperimentConfig",
+    "NetworkParams",
     "SnnAgent",
     "SnnAgentConfig",
-    "NetworkParams",
-    "ExperimentConfig",
 ]

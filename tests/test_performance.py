@@ -1,12 +1,13 @@
 # keywords: [test, pytest, performance, benchmark, async, compression]
 """Performance tests for the DataExporter module."""
 
-import pytest
-import numpy as np
-import time
-import tempfile
 import shutil
+import tempfile
+import time
 from pathlib import Path
+
+import numpy as np
+import pytest
 
 from export import DataExporter
 

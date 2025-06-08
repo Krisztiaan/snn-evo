@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """Test JAX JIT compilation for grid world 0002."""
 
+import os
+import sys
+import time
+
+import jax.numpy as jnp
+from jax import random
+
 from world.simple_grid_0001.types import WorldConfig
 from world.simple_grid_0002.world import SimpleGridWorld
-from jax import random
-import jax.numpy as jnp
-import jax
-import time
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(
-    os.path.dirname(os.path.abspath(__file__)))))
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 
 def test_jit_compilation():
@@ -29,14 +30,14 @@ def test_jit_compilation():
     start = time.time()
     state1, obs1 = world.reset(key)
     first_time = time.time() - start
-    print(f"   First call (with compilation): {first_time*1000:.2f}ms")
+    print(f"   First call (with compilation): {first_time * 1000:.2f}ms")
 
     # Second call (compiled)
     start = time.time()
     state2, obs2 = world.reset(random.PRNGKey(1))
     second_time = time.time() - start
-    print(f"   Second call (compiled): {second_time*1000:.2f}ms")
-    print(f"   Speedup: {first_time/second_time:.1f}x")
+    print(f"   Second call (compiled): {second_time * 1000:.2f}ms")
+    print(f"   Speedup: {first_time / second_time:.1f}x")
 
     # Test step compilation
     print("\n2. Testing step JIT compilation...")
@@ -45,14 +46,14 @@ def test_jit_compilation():
     start = time.time()
     result1 = world.step(state1, 0, random.PRNGKey(2))
     first_time = time.time() - start
-    print(f"   First call (with compilation): {first_time*1000:.2f}ms")
+    print(f"   First call (with compilation): {first_time * 1000:.2f}ms")
 
     # Second call (compiled)
     start = time.time()
     result2 = world.step(result1.state, 1, random.PRNGKey(3))
     second_time = time.time() - start
-    print(f"   Second call (compiled): {second_time*1000:.2f}ms")
-    print(f"   Speedup: {first_time/second_time:.1f}x")
+    print(f"   Second call (compiled): {second_time * 1000:.2f}ms")
+    print(f"   Speedup: {first_time / second_time:.1f}x")
 
     # Test with many steps
     print("\n3. Running 1000 steps benchmark...")
@@ -67,8 +68,8 @@ def test_jit_compilation():
     elapsed = time.time() - start
 
     print(f"   1000 steps completed in {elapsed:.3f}s")
-    print(f"   Average time per step: {elapsed/1000*1000:.2f}ms")
-    print(f"   Steps per second: {1000/elapsed:.0f}")
+    print(f"   Average time per step: {elapsed / 1000 * 1000:.2f}ms")
+    print(f"   Steps per second: {1000 / elapsed:.0f}")
 
     # Verify outputs are JAX arrays
     print("\n4. Verifying JAX array outputs...")
@@ -96,7 +97,7 @@ def test_correctness():
     key = random.PRNGKey(42)
     state, obs = world.reset(key)
 
-    print(f"\n1. Initial state:")
+    print("\n1. Initial state:")
     print(f"   Agent position: {state.agent_pos}")
     print(f"   Number of rewards: {len(state.reward_positions)}")
     print(f"   Initial gradient: {obs.gradient:.4f}")
@@ -163,8 +164,7 @@ def benchmark_vs_baseline():
     jax_time = time.time() - start
     print(f"   1000 steps: {jax_time:.3f}s")
 
-    print(
-        f"\n3. Performance improvement: {baseline_time/jax_time:.1f}x faster!")
+    print(f"\n3. Performance improvement: {baseline_time / jax_time:.1f}x faster!")
 
     return baseline_time, jax_time
 
@@ -176,12 +176,11 @@ if __name__ == "__main__":
 
     try:
         baseline_time, jax_time = benchmark_vs_baseline()
-        print(
-            f"\n\n🎉 SUCCESS! JAX world is {baseline_time/jax_time:.1f}x faster than baseline!")
+        print(f"\n\n🎉 SUCCESS! JAX world is {baseline_time / jax_time:.1f}x faster than baseline!")
     except ImportError:
         print("\n\nNote: Could not benchmark against baseline (import error)")
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("JAX JIT compilation test complete!")
     print("The grid world is now fully JAX-compatible with static shapes.")
-    print("="*60)
+    print("=" * 60)

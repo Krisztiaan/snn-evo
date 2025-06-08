@@ -3,10 +3,13 @@
 """Configuration for the Phase 0.5 SNN Agent."""
 
 from typing import NamedTuple
+
 from world.simple_grid_0001 import WorldConfig
+
 
 class NetworkParams(NamedTuple):
     """Biologically-plausible network parameters."""
+
     # Architecture
     NUM_NEURONS: int = 256
     NUM_INPUTS: int = 16  # For population coding
@@ -61,15 +64,19 @@ class NetworkParams(NamedTuple):
     W_II_MEAN: float = 0.2
     W_STD_SCALE: float = 0.3  # Std dev as a fraction of mean
 
+
 class ExperimentConfig(NamedTuple):
     """Configuration for the experiment run."""
+
     n_episodes: int = 1
     seed: int = 42
     export_dir: str = "experiments/phase_0.5"
     enable_export: bool = True
 
+
 class SnnAgentConfig(NamedTuple):
     """Master configuration for the SNN agent and experiment."""
+
     world_config: WorldConfig = WorldConfig()
     network_params: NetworkParams = NetworkParams()
     exp_config: ExperimentConfig = ExperimentConfig()

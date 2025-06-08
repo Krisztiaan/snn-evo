@@ -10,13 +10,13 @@ This version introduces critical architectural changes for more realistic dynami
 - Time-integrated decision-making based on motor neuron "voting".
 """
 
-from .config import SnnAgentConfig, NetworkParams, ExperimentConfig
 from .agent import SnnAgent
+from .config import ExperimentConfig, NetworkParams, SnnAgentConfig
 
 __version__ = "0.7.0"
 __all__ = [
+    "ExperimentConfig",
+    "NetworkParams",
     "SnnAgent",
     "SnnAgentConfig",
-    "NetworkParams",
-    "ExperimentConfig",
 ]
