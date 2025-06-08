@@ -1,21 +1,30 @@
 # keywords: [export module, public API, initialization]
 """Neural Network Data Export Module
 
-High-performance HDF5-based data export system for neural network experiments.
+A high-performance, HDF5-based data export system designed for
+efficiency and comprehensive data capture in neural network experiments.
 """
 
-# Import the optimized exporter as the default
-from .exporter_optimized import OptimizedDataExporter as DataExporter
-from .exporter_optimized import OptimizedEpisode as Episode
+from typing import List
+
+# Import the primary DataExporter and Episode classes
+from .data_exporter import DataExporter
+from .episode import Episode
 
 # Import data loading utilities
 from .loader import ExperimentLoader, EpisodeData
 
-# Import utilities
+# Import utility functions
 from .utils import ensure_numpy
 
-# Version
-__version__ = "2.0.1"
+# Public API definition
+__all__: List[str] = [
+    "DataExporter",
+    "Episode",
+    "ExperimentLoader",
+    "EpisodeData",
+    "ensure_numpy",
+]
 
-# Public API
-__all__ = ["DataExporter", "Episode", "ExperimentLoader", "EpisodeData", "ensure_numpy"]
+# Version of the export module
+__version__ = "3.0.0"
