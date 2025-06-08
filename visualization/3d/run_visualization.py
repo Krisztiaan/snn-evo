@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
-# keywords: [unified runner, visualization server, experiment watcher]
-"""Unified script to run the HDF5-based visualization server."""
+# keywords: [unified runner, visualization server, data analysis tool]
+"""
+Unified script to run the SNN Scientific Visualization Tool.
+
+This tool provides a web-based interface for in-depth analysis of
+SNN experiment data stored in HDF5 files.
+"""
 
 import subprocess
 import sys
@@ -9,50 +14,58 @@ import webbrowser
 from pathlib import Path
 from threading import Thread
 
-# Add parent directories to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+# Add project root to path for imports
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 
 def start_api_server():
     """Start the API server."""
-    print("Starting API server...")
-    cmd = [sys.executable, "visualization/3d/api_server.py"]
-    subprocess.run(cmd)
+    server_script = Path(__file__).parent / "api_server.py"
+    print(f"Starting API server from: {server_script}")
+    cmd = [sys.executable, str(server_script)]
+    process = subprocess.Popen(cmd, stdout=sys.stdout, stderr=sys.stderr)
+    return process
 
 
 def open_browser(url, delay=2):
     """Open browser after a delay."""
     time.sleep(delay)
     print(f"\nOpening browser at: {url}")
-    webbrowser.open(url)
+    try:
+        webbrowser.open(url)
+    except Exception as e:
+        print(f"Could not open browser automatically: {e}")
+        print(f"Please navigate to {url} manually.")
 
 
 def main():
     """Main entry point."""
     print("=" * 60)
-    print("Grid World HDF5 Visualization")
+    print("SNN Scientific Visualization Tool")
     print("=" * 60)
-    print("\nThis visualization directly loads HDF5 experiment files")
-    print("using the standardized ExperimentLoader module.")
+    print("\nThis tool directly loads and analyzes HDF5 experiment files.")
     print("\nFeatures:")
-    print("  - Browse all available experiments")
-    print("  - Select and load specific episodes")
-    print("  - Real-time trajectory playback")
-    print("  - Seamless HDF5 -> Visualization pipeline")
+    print("  - Browse all available experiments by model phase.")
+    print("  - 3D trajectory playback with detailed data overlay.")
+    print("  - Synchronized charts for behavior, neural dynamics, and learning signals.")
+    print("  - Designed for rigorous scientific analysis of agent behavior.")
     print("\nStarting server...")
 
-    # Start browser in background
-    browser_thread = Thread(
-        target=open_browser, args=("http://localhost:8000/grid_world_trajectory_viewer.html",)
-    )
+    url = "http://localhost:8000/"
+    browser_thread = Thread(target=open_browser, args=(url,))
     browser_thread.daemon = True
     browser_thread.start()
 
-    # Run server (blocks)
+    server_process = None
     try:
-        start_api_server()
+        server_process = start_api_server()
+        server_process.wait()
     except KeyboardInterrupt:
         print("\n\nShutting down...")
+    finally:
+        if server_process:
+            server_process.terminate()
+            server_process.wait()
         sys.exit(0)
 
 
