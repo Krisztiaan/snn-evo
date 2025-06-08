@@ -127,8 +127,9 @@ class Episode:
                 self._spike_buffer_neurons.extend(indices.tolist())
 
                 # Flush if buffer is full
-                # Assume ~10 spikes/timestep avg
-                if len(self._spike_buffer_times) >= self.spike_buffer_size * 10:
+                if (
+                    len(self._spike_buffer_times) >= self.spike_buffer_size * 10
+                ):  # Assume ~10 spikes/timestep avg
                     self._flush_spike_buffer()
 
         # Behavior (all timesteps)
@@ -290,7 +291,11 @@ class Episode:
                 else:
                     shape = (allocated_size,) + value_np.shape
                     maxshape = (None,) + value_np.shape
-                    chunks = (min(1000, allocated_size),) + value_np.shape
+                    chunks = (
+                        (min(1000, allocated_size),) + value_np.shape
+                        if allocated_size > 0
+                        else (1,) + value_np.shape
+                    )
 
                 group.create_dataset(
                     key,
@@ -362,34 +367,32 @@ class Episode:
         neurons = np.array(self._spike_buffer_neurons, dtype=np.int32)
 
         # Create or extend datasets
-        if "spike_times" not in self.spike_group:
+        if "timesteps" not in self.spike_group:
             # Create with chunking and compression
             self.spike_group.create_dataset(
-                "spike_times",
+                "timesteps",
                 data=times,
                 maxshape=(None,),
                 chunks=(min(10000, len(times)),),
-                compression="gzip",
-                compression_opts=1,  # Fast compression
+                **self._compression_kwargs,
             )
             self.spike_group.create_dataset(
-                "spike_neurons",
+                "neuron_ids",
                 data=neurons,
                 maxshape=(None,),
                 chunks=(min(10000, len(neurons)),),
-                compression="gzip",
-                compression_opts=1,
+                **self._compression_kwargs,
             )
         else:
             # Extend existing datasets
-            old_len = self.spike_group["spike_times"].shape[0]
+            old_len = self.spike_group["timesteps"].shape[0]
             new_len = old_len + len(times)
 
-            self.spike_group["spike_times"].resize((new_len,))
-            self.spike_group["spike_neurons"].resize((new_len,))
+            self.spike_group["timesteps"].resize((new_len,))
+            self.spike_group["neuron_ids"].resize((new_len,))
 
-            self.spike_group["spike_times"][old_len:new_len] = times
-            self.spike_group["spike_neurons"][old_len:new_len] = neurons
+            self.spike_group["timesteps"][old_len:new_len] = times
+            self.spike_group["neuron_ids"][old_len:new_len] = neurons
 
         # Clear buffers
         self._spike_buffer_times.clear()
@@ -466,8 +469,9 @@ class DataExporter:
         if not self.no_write:
             self.h5_file.attrs["simulation_dt"] = self.simulation_dt
             self.h5_file.attrs["behavior_sampling_rate"] = 1  # Every timestep
-            # Version with proper timestep handling
-            self.h5_file.attrs["data_format_version"] = "1.1"
+            self.h5_file.attrs["data_format_version"] = (
+                "1.1"  # Version with proper timestep handling
+            )
 
             # Create groups
             self.episodes_group = self.h5_file.create_group("episodes")

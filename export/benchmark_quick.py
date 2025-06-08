@@ -15,19 +15,14 @@ def quick_benchmark(name: str, n_timesteps: int = 1000, n_neurons: int = 500, **
     with tempfile.TemporaryDirectory() as temp_dir:
         start_time = time.perf_counter()
 
-        with DataExporter(
-            experiment_name="bench",
-            output_base_dir=temp_dir,
-            **config
-        ) as exporter:
+        with DataExporter(experiment_name="bench", output_base_dir=temp_dir, **config) as exporter:
             with exporter.start_episode(0) as episode:
                 # Generate data
                 for t in range(n_timesteps):
                     episode.log_timestep(
                         timestep=t,
                         neural_state={"v": np.random.randn(n_neurons)},
-                        spikes=np.random.binomial(
-                            1, 0.01, n_neurons) if t % 10 == 0 else None
+                        spikes=np.random.binomial(1, 0.01, n_neurons) if t % 10 == 0 else None,
                     )
 
         elapsed_time = time.perf_counter() - start_time
@@ -44,7 +39,7 @@ def quick_benchmark(name: str, n_timesteps: int = 1000, n_neurons: int = 500, **
             "name": name,
             "time": elapsed_time,
             "throughput_mbps": throughput_mbps,
-            "file_size_mb": file_size / (1024 * 1024)
+            "file_size_mb": file_size / (1024 * 1024),
         }
 
 
@@ -58,12 +53,15 @@ def main():
         ("Async (4 workers)", {"async_write": True, "n_async_workers": 4}),
         ("No Validation", {"validate_data": False}),
         ("Fast Compression", {"compression": "lzf"}),
-        ("All Enhancements", {
-            "validate_data": False,
-            "async_write": True,
-            "n_async_workers": 4,
-            "compression": "lzf"
-        })
+        (
+            "All Enhancements",
+            {
+                "validate_data": False,
+                "async_write": True,
+                "n_async_workers": 4,
+                "compression": "lzf",
+            },
+        ),
     ]
 
     results = []
@@ -74,15 +72,14 @@ def main():
         print(f"{result['throughput_mbps']:.1f} MB/s")
 
     # Summary
-    print("\n" + "="*50)
+    print("\n" + "=" * 50)
     print("SUMMARY (Higher is better)")
-    print("="*50)
+    print("=" * 50)
 
     baseline = results[0]["throughput_mbps"]
     for result in results:
         improvement = (result["throughput_mbps"] / baseline - 1) * 100
-        print(
-            f"{result['name']:<20} {result['throughput_mbps']:>6.1f} MB/s ({improvement:+5.1f}%)")
+        print(f"{result['name']:<20} {result['throughput_mbps']:>6.1f} MB/s ({improvement:+5.1f}%)")
 
 
 if __name__ == "__main__":

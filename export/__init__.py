@@ -15,13 +15,7 @@ from .loader import ExperimentLoader, EpisodeData
 from .utils import ensure_numpy
 
 # Version
-__version__ = "2.0.0"
+__version__ = "2.0.1"
 
 # Public API
-__all__ = [
-    "DataExporter",
-    "Episode",
-    "ExperimentLoader",
-    "EpisodeData",
-    "ensure_numpy"
-]
+__all__ = ["DataExporter", "Episode", "ExperimentLoader", "EpisodeData", "ensure_numpy"]

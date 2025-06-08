@@ -26,8 +26,7 @@ class AsyncWriteQueue:
             max_queue_size: Maximum items in queue before blocking
         """
         self.queue = queue.Queue(maxsize=max_queue_size)
-        self.workers = []
-        self.executor = ThreadPoolExecutor(max_workers=n_workers)
+        self.executor = ThreadPoolExecutor(max_workers=n_workers, thread_name_prefix="AsyncWrite")
         self._shutdown = False
         self._stats = {"writes": 0, "bytes_written": 0, "queue_wait_time": 0.0, "write_time": 0.0}
         self._stats_lock = threading.Lock()
@@ -38,10 +37,11 @@ class AsyncWriteQueue:
 
     def _worker(self):
         """Worker thread for processing write operations."""
-        while not self._shutdown:
+        while not self._shutdown or not self.queue.empty():
             try:
                 item = self.queue.get(timeout=0.1)
                 if item is None:  # Shutdown signal
+                    self.queue.task_done()
                     break
 
                 write_fn, args, kwargs = item
@@ -56,11 +56,15 @@ class AsyncWriteQueue:
                     self._stats["writes"] += 1
                     self._stats["write_time"] += write_time
 
+                self.queue.task_done()
             except queue.Empty:
+                if self._shutdown:
+                    break
                 continue
             except Exception as e:
                 # Log error but continue processing
                 print(f"AsyncWriteQueue error: {e}")
+                self.queue.task_done()
 
     def submit(self, write_fn: Callable, *args, **kwargs):
         """Submit a write operation to the queue.
@@ -88,14 +92,9 @@ class AsyncWriteQueue:
 
     def shutdown(self):
         """Shutdown the async write queue."""
-        self._shutdown = True
-
-        # Send shutdown signals
-        for _ in range(len(self.workers)):
-            self.queue.put(None)
-
-        # Shutdown executor
-        self.executor.shutdown(wait=True)
+        if not self._shutdown:
+            self._shutdown = True
+            self.executor.shutdown(wait=True)
 
     def get_stats(self) -> Dict[str, Any]:
         """Get performance statistics."""
@@ -189,10 +188,8 @@ class AdaptiveCompressor:
                     continue
 
                 # Calculate score based on compression ratio and speed
-                # Lower ratio is better
-                compression_score = 1.0 - stats["ratio"]
-                # Lower time is better
-                speed_score = 1.0 / (1.0 + stats["time"])
+                compression_score = 1.0 - stats["ratio"]  # Lower ratio is better
+                speed_score = 1.0 / (1.0 + stats["time"])  # Lower time is better
 
                 score = (1 - speed_priority) * compression_score + speed_priority * speed_score
 

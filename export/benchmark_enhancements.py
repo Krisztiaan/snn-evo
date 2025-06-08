@@ -4,7 +4,6 @@
 import numpy as np
 import time
 import tempfile
-import shutil
 from pathlib import Path
 import matplotlib.pyplot as plt
 import json
