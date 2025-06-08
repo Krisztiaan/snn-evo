@@ -130,3 +130,23 @@ class EpisodeData:
         if name not in self.group:
             return {}
         return {key: ds[:] for key, ds in self.group[name].items()}
+
+    def get_events(self) -> List[Dict[str, Any]]:
+        """Get all logged discrete events."""
+        if "events" not in self.group:
+            return []
+
+        events = []
+        # Sort by HDF5 object name to get chronological order
+        for event_name in sorted(self.group["events"]):
+            event_group = self.group["events"][event_name]
+            event_data = dict(event_group.attrs)
+            events.append(event_data)
+        return events
+
+    def get_weight_changes(self) -> Dict[str, np.ndarray]:
+        """Get plasticity data (weight changes)."""
+        if "plasticity" not in self.group:
+            return {}
+        # Load all datasets within the plasticity group
+        return {key: ds[:] for key, ds in self.group["plasticity"].items()}

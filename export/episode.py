@@ -2,6 +2,7 @@
 """Manages data storage for a single episode with high performance."""
 
 import threading
+import warnings
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 
@@ -60,6 +61,7 @@ class BufferedDataset:
         memory_tracker: MemoryTracker,
     ):
         self.name = name
+        self.chunk_size = chunk_size
         self.async_queue = async_queue
         self.memory_tracker = memory_tracker
         self._lock = threading.Lock()
@@ -184,6 +186,8 @@ class Episode:
             self.group.attrs["status"] = "running"
             self.neural_group = self.group.create_group("neural_states")
             self.behavior_group = self.group.create_group("behavior")
+            self.events_group = self.group.create_group("events")
+            self.plasticity_group = self.group.create_group("plasticity")
             self.data_manager = EpisodeDataManager(self.group, config, memory_tracker)
         else:
             # no_write mode, create dummy manager
@@ -217,7 +221,9 @@ class Episode:
             return
         data = optimize_jax_conversion(data)
 
-        ts_writer = self.data_manager.get_or_create_dataset(group, "timesteps", np.int64, (0,))
+        ts_writer = self.data_manager.get_or_create_dataset(
+            group, "timesteps", np.dtype(np.int64), (0,)
+        )
         ts_writer.append(np.array(timestep, dtype=np.int64))
 
         for key, value in data.items():
@@ -234,6 +240,47 @@ class Episode:
             group = self.group.create_group(name)
             for key, value in data.items():
                 group.create_dataset(key, data=ensure_numpy(value))
+
+    def log_event(self, name: str, timestep: int, data: Dict[str, Any]) -> None:
+        """Log a discrete event with associated metadata."""
+        if self.group is None:
+            return
+        with _HDF5_LOCK:
+            # Event group name includes timestep for sorting
+            event_group = self.events_group.create_group(f"event_{timestep:08d}_{name}")
+            event_group.attrs["timestep"] = timestep
+            event_group.attrs["name"] = name
+            for key, value in data.items():
+                try:
+                    event_group.attrs[key] = value
+                except TypeError:
+                    event_group.attrs[key] = str(value)
+
+    def log_weight_change(
+        self,
+        timestep: int,
+        synapse_id: Tuple[int, int],
+        old_weight: float,
+        new_weight: float,
+    ) -> None:
+        """Log a single synaptic weight change event."""
+        if self.data_manager is None:
+            return
+
+        # For efficiency, we buffer these changes.
+        writers = {
+            "timesteps": (np.dtype(np.int64), timestep),
+            "synapse_src": (np.dtype(np.int32), synapse_id[0]),
+            "synapse_tgt": (np.dtype(np.int32), synapse_id[1]),
+            "old_weights": (np.dtype(np.float32), old_weight),
+            "new_weights": (np.dtype(np.float32), new_weight),
+        }
+
+        for name, (dtype, value) in writers.items():
+            writer = self.data_manager.get_or_create_dataset(
+                self.plasticity_group, name, dtype, (0,)
+            )
+            writer.append(np.array(value, dtype=dtype))
 
     def end(self, success: bool = False) -> None:
         """End episode and flush all buffers."""

@@ -1,4 +1,4 @@
-# keywords: [data exporter, hdf5, high-performance, experiment management]
+# keywords: [data exporter, hdf5, high-performance, experiment management, versioning]
 """The main DataExporter class for managing experiment data files."""
 
 import json
@@ -6,11 +6,12 @@ import warnings
 import zlib
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, NamedTuple, Optional, Tuple
 
 import h5py
 import numpy as np
 
+from . import __version__ as EXPORTER_VERSION
 from .episode import _HDF5_LOCK, MEMORY_MAP_BLOCK_SIZE, Episode, MemoryTracker
 from .performance import (
     AdaptiveCompressor,
@@ -126,23 +127,28 @@ class DataExporter:
             self.h5_file.attrs["timestamp"] = self.timestamp
             self.h5_file.attrs["start_time"] = datetime.now().isoformat()
             self.h5_file.attrs["schema_version"] = SCHEMA_VERSION
+            self.h5_file.attrs["exporter_version"] = EXPORTER_VERSION
             self.h5_file.attrs.update(self.config)
             self.episodes_group = self.h5_file.create_group("episodes")
             self.checkpoints_group = self.h5_file.create_group("checkpoints")
 
-    def save_config(self, config: Dict[str, Any]) -> None:
+    def save_config(self, config: NamedTuple) -> None:
         """Save experiment configuration to JSON and HDF5."""
         if self.no_write or self.h5_file is None:
             return
 
+        # Add exporter version to the saved config for easy reference
+        config_to_save = config._asdict()
+        config_to_save["_exporter_version"] = EXPORTER_VERSION
+
         with open(self.output_dir / "config.json", "w") as f:
-            json.dump(config, f, indent=2, cls=NumpyEncoder)
+            json.dump(config_to_save, f, indent=2, cls=NumpyEncoder)
 
         with _HDF5_LOCK:
             if "config" in self.h5_file:
                 del self.h5_file["config"]
             config_group = self.h5_file.create_group("config")
-            for key, value in config.items():
+            for key, value in config_to_save.items():
                 if isinstance(value, (dict, list)):
                     json_str = json.dumps(value, cls=NumpyEncoder)
                     compressed = zlib.compress(json_str.encode("utf-8"))
@@ -228,7 +234,10 @@ class DataExporter:
             warnings.warn("No active episode to end.", stacklevel=2)
             return
 
-        self.current_episode.end(success=success)
+        # Type assertion - we know current_episode is not None here
+        current_episode = self.current_episode
+        assert current_episode is not None
+        current_episode.end(success=success)
 
         if not self.no_write and self.h5_file:
             with _HDF5_LOCK:
@@ -236,10 +245,10 @@ class DataExporter:
                     self.h5_file.create_group("episode_summaries")
                 summary_group = self.h5_file["episode_summaries"]
                 ep_summary_group = summary_group.create_group(
-                    f"episode_{self.current_episode.episode_id:04d}"
+                    f"episode_{current_episode.episode_id:04d}"
                 )
-                if self.current_episode.group is not None:
-                    for key, value in self.current_episode.group.attrs.items():
+                if current_episode.group is not None:
+                    for key, value in current_episode.group.attrs.items():
                         ep_summary_group.attrs[key] = value
                 if summary:
                     for key, value in summary.items():
@@ -265,6 +274,24 @@ class DataExporter:
             raise RuntimeError("No active episode. Call start_episode() first.")
         self.current_episode.log_static_data(name, data)
 
+    def log_event(self, name: str, timestep: int, data: Dict[str, Any]) -> None:
+        """Log a discrete event for the current episode."""
+        if self.current_episode is None:
+            raise RuntimeError("No active episode. Call start_episode() first.")
+        self.current_episode.log_event(name, timestep, data)
+
+    def log_weight_change(
+        self,
+        timestep: int,
+        synapse_id: Tuple[int, int],
+        old_weight: float,
+        new_weight: float,
+    ) -> None:
+        """Log a single synaptic weight change for the current episode."""
+        if self.current_episode is None:
+            raise RuntimeError("No active episode. Call start_episode() first.")
+        self.current_episode.log_weight_change(timestep, synapse_id, old_weight, new_weight)
+
     def get_performance_stats(self) -> Dict[str, Any]:
         """Get comprehensive performance statistics."""
         stats: Dict[str, Any] = {}
@@ -289,7 +316,7 @@ class DataExporter:
             "output_directory": str(self.output_dir),
             "hdf5_driver": self.h5_file.driver if self.h5_file else "none",
         }
-        if self.no_write:
+        if self.no_write or self.h5_file is None:
             return
 
         with _HDF5_LOCK:

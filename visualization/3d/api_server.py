@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-# keywords: [api, server, hdf5, scientific visualization, data analysis]
+# keywords: [api, server, hdf5, scientific visualization, caching, performance]
 """
 API server for the SNN Scientific Visualization Tool.
 
 This server provides a comprehensive, structured JSON endpoint for a single
-experiment episode, designed for detailed analysis and visualization.
+experiment episode. It pre-scans and caches the experiment list at startup
+for high performance and filters for compatible data versions.
 """
 
 import json
@@ -19,8 +20,69 @@ import numpy as np
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
+from export import __version__ as COMPATIBLE_EXPORTER_VERSION
 from export.loader import ExperimentLoader
 from export.utils import NumpyEncoder
+
+# Global cache for the experiment list
+EXPERIMENT_CACHE = {}
+
+
+def scan_and_cache_experiments():
+    """
+    Scans the experiments directory and caches the list of compatible runs.
+    This is a slow operation and should only be run once at startup.
+    """
+    print(f"Scanning for experiments compatible with exporter v{COMPATIBLE_EXPORTER_VERSION}...")
+    experiments_by_model = {}
+    base_dir = Path("experiments")
+
+    if not base_dir.exists():
+        return {"models": {}, "count": 0}
+
+    for model_dir in sorted(base_dir.iterdir()):
+        if not model_dir.is_dir():
+            continue
+
+        model_name = model_dir.name
+        model_experiments = []
+
+        for exp_dir in sorted(model_dir.iterdir(), reverse=True):
+            if not exp_dir.is_dir() or not list(exp_dir.glob("*.h5")):
+                continue
+
+            try:
+                with ExperimentLoader(exp_dir) as loader:
+                    metadata = loader.get_metadata()
+                    
+                    exp_version = metadata.get("exporter_version")
+                    if exp_version != COMPATIBLE_EXPORTER_VERSION:
+                        continue
+
+                    episodes = loader.list_episodes()
+                    if not episodes:
+                        continue
+
+                    label = f"{metadata.get('experiment_name', exp_dir.name)} ({len(episodes)} ep)"
+                    model_experiments.append(
+                        {
+                            "path": str(exp_dir),
+                            "label": label,
+                            "episodes": episodes,
+                            "timestamp": exp_dir.stat().st_mtime,
+                        }
+                    )
+            except Exception as e:
+                # This is expected for corrupted or older format files
+                print(f"  - Skipping incompatible/corrupt run {exp_dir.name}: {e}")
+
+        if model_experiments:
+            experiments_by_model[model_name] = model_experiments
+
+    return {
+        "models": experiments_by_model,
+        "count": sum(len(runs) for runs in experiments_by_model.values()),
+    }
 
 
 class ScientificAPIHandler(BaseHTTPRequestHandler):
@@ -29,16 +91,17 @@ class ScientificAPIHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         """Handle GET requests."""
         parsed_path = urlparse(self.path)
-        print(f"GET request: {parsed_path.path}")
-
+        
         try:
             if parsed_path.path.startswith("/api/"):
                 self.handle_api_request(parsed_path)
             else:
                 self.serve_static_file(parsed_path)
+        except BrokenPipeError:
+            self.log_message("Client closed connection.")
         except Exception as e:
             import traceback
-            print(f"Error processing {self.path}: {e}")
+            self.log_error(f"Error processing {self.path}: {e}")
             traceback.print_exc()
             self.send_error_response(500, f"Internal Server Error: {e}")
 
@@ -80,7 +143,6 @@ class ScientificAPIHandler(BaseHTTPRequestHandler):
 
         file_path = (Path(__file__).parent / path.lstrip("/")).resolve()
 
-        # Security check: ensure the path is within the visualization directory
         if not file_path.is_relative_to(Path(__file__).parent):
             self.send_error_response(403, "Forbidden")
             return
@@ -96,52 +158,8 @@ class ScientificAPIHandler(BaseHTTPRequestHandler):
             self.send_error_response(404, f"Static file not found: {path}")
 
     def handle_list_experiments(self):
-        """List all available experiments, organized by model."""
-        experiments_by_model = {}
-        base_dir = Path("experiments")
-
-        if not base_dir.exists():
-            self.wfile.write(json.dumps({"models": {}, "count": 0}).encode())
-            return
-
-        for model_dir in sorted(base_dir.iterdir()):
-            if not model_dir.is_dir():
-                continue
-
-            model_name = model_dir.name
-            model_experiments = []
-
-            for exp_dir in sorted(model_dir.iterdir(), reverse=True):
-                if not exp_dir.is_dir() or not list(exp_dir.glob("*.h5")):
-                    continue
-
-                try:
-                    with ExperimentLoader(exp_dir) as loader:
-                        metadata = loader.get_metadata()
-                        episodes = loader.list_episodes()
-                        if not episodes:
-                            continue
-
-                        label = f"{metadata.get('experiment_name', exp_dir.name)} ({len(episodes)} ep)"
-                        model_experiments.append(
-                            {
-                                "path": str(exp_dir),
-                                "label": label,
-                                "episodes": episodes,
-                                "timestamp": exp_dir.stat().st_mtime,
-                            }
-                        )
-                except Exception as e:
-                    print(f"Could not load metadata from {exp_dir}: {e}")
-
-            if model_experiments:
-                experiments_by_model[model_name] = model_experiments
-
-        response = {
-            "models": experiments_by_model,
-            "count": sum(len(runs) for runs in experiments_by_model.values()),
-        }
-        self.wfile.write(json.dumps(response, cls=NumpyEncoder).encode())
+        """Serve the cached list of experiments."""
+        self.wfile.write(json.dumps(EXPERIMENT_CACHE, cls=NumpyEncoder).encode())
 
     def handle_get_episode_data(self, path: str, episode_id: int):
         """Load, process, and return comprehensive data for one episode."""
@@ -196,7 +214,6 @@ class ScientificAPIHandler(BaseHTTPRequestHandler):
                     spike_count = int(spike_counts.get(ts, 0))
                     firing_rate = (spike_count / total_neurons) * 1000.0 if total_neurons > 0 else 0
                     
-                    # Safely access potentially missing neural data
                     dopamine = neural.get("dopamine")
                     value_est = neural.get("value_estimate")
 
@@ -234,11 +251,17 @@ class ScientificAPIHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({"error": message}).encode())
         except Exception as e:
-            print(f"Failed to send error response: {e}")
+            self.log_error(f"Failed to send error response for '{message}': {e}")
 
 
 def main():
     """Run the API server."""
+    global EXPERIMENT_CACHE
+    
+    # Pre-scan and cache experiments at startup
+    EXPERIMENT_CACHE = scan_and_cache_experiments()
+    print(f"Server ready. Found {EXPERIMENT_CACHE['count']} compatible runs.")
+
     port = 8000
     server_address = ("", port)
     httpd = HTTPServer(server_address, ScientificAPIHandler)

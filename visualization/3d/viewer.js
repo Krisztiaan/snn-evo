@@ -43,7 +43,6 @@ const CONFIG = {
     TRAIL_COLOR: 0xFF6B00,
     AGENT_SIZE: 0.7,
     REWARD_SIZE: 0.4,
-    // Chart colors matching CSS variables
     CHART_PRIMARY: '#FF6B00',
     CHART_SECONDARY: '#00A8E8',
     CHART_TEXT: '#f0f0f0',
@@ -52,8 +51,6 @@ const CONFIG = {
     CHART_LEARNING_1: '#FFC107',
     CHART_LEARNING_2: '#9C27B0',
 };
-
-// --- Initialization ---
 
 function init() {
     setupScene();
@@ -110,10 +107,8 @@ function attachEventListeners() {
     DOM.toggleAnalyticsBtn.addEventListener('click', toggleAnalytics);
 }
 
-// --- Data Loading ---
-
 async function loadExperimentList() {
-    showLoading('Loading experiments...');
+    showLoading('Loading compatible experiments...');
     try {
         const response = await fetch('/api/experiments');
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
@@ -123,10 +118,11 @@ async function loadExperimentList() {
     } catch (e) {
         showLoading(`Error: ${e.message}`);
     } finally {
-        if (Object.keys(state.experiments).length > 0) {
+        const totalRuns = Object.values(state.experiments).reduce((sum, runs) => sum + runs.length, 0);
+        if (totalRuns > 0) {
             hideLoading();
         } else {
-            showLoading('No experiments found.');
+            showLoading('No compatible experiments found.');
         }
     }
 }
@@ -150,8 +146,6 @@ window.loadData = async function() {
         hideLoading();
     }
 }
-
-// --- UI Population ---
 
 function populateModelSelect() {
     DOM.modelSelect.innerHTML = '<option value="">Select a Model</option>';
@@ -196,9 +190,6 @@ window.selectRun = function() {
     });
     DOM.loadBtn.style.display = 'block';
 }
-
-
-// --- Visualization Setup ---
 
 function setupVisualization() {
     clearScene();
@@ -279,8 +270,6 @@ function createTrail() {
     state.scene.add(trail);
     return trail;
 }
-
-// --- Playback and Update ---
 
 function setStep(step) {
     if (!state.currentData) return;
@@ -379,8 +368,6 @@ function animate() {
     state.renderer.render(state.scene, state.camera);
 }
 
-// --- Analytics ---
-
 function toggleAnalytics() {
     const isHidden = DOM.analyticsPanel.style.display === 'none';
     DOM.analyticsPanel.style.display = isHidden ? 'block' : 'none';
@@ -462,7 +449,8 @@ function updateCharts() {
     const markLineOpt = {
         symbol: 'none',
         lineStyle: { type: 'solid', color: CONFIG.CHART_PRIMARY, width: 2 },
-        data: [{ xAxis: state.currentStep }]
+        data: [{ xAxis: state.currentStep }],
+        silent: true,
     };
     Object.values(state.charts).forEach(chart => {
         chart.setOption({ series: [ { markLine: markLineOpt }, { markLine: markLineOpt } ] });
@@ -478,5 +466,4 @@ function hideLoading() {
     DOM.loadingOverlay.style.display = 'none';
 }
 
-// --- Start Application ---
 init();

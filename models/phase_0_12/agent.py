@@ -1042,3 +1042,5 @@ class SnnAgent:
 
 # Alias for backward compatibility
 OptimizedSnnAgent = SnnAgent
+
+

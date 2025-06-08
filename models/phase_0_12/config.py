@@ -167,3 +167,4 @@ class SnnAgentConfig(NamedTuple):
     world_config: WorldConfig = WorldConfig()
     network_params: NetworkParams = NetworkParams()
     exp_config: ExperimentConfig = ExperimentConfig()
+

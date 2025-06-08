@@ -23,7 +23,8 @@
         #analytics { bottom: 10px; left: 340px; right: 10px; height: 280px; display: none; }
         h3 { margin-top: 0; color: var(--primary-color); border-bottom: 1px solid var(--border-color); padding-bottom: 5px; }
         button, select { background: #333; color: white; border: 1px solid #555; border-radius: 4px; padding: 8px 12px; cursor: pointer; transition: background 0.2s; width: 100%; margin-top: 5px; }
-        button:hover { background: #444; }
+        button:hover, select:hover { background: #444; }
+        button:disabled, select:disabled { background: #222; color: #777; cursor: not-allowed; }
         button.primary { background: var(--primary-color); border-color: var(--primary-color); }
         button.primary:hover { background: #E85A00; }
         #loadingOverlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.8); display: flex; justify-content: center; align-items: center; color: white; font-size: 20px; z-index: 1000; }
