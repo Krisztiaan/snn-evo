@@ -8,7 +8,6 @@ import numpy as np
 
 try:
     import jax
-    import jax.numpy as jnp
 
     JAX_AVAILABLE = True
 except ImportError:
@@ -52,11 +51,25 @@ class NumpyEncoder(json.JSONEncoder):
 
     def default(self, obj: Any) -> Any:
         if isinstance(obj, np.ndarray):
+            # Convert to list. Items will be handled by subsequent calls
+            # or by the float handling below if they are float('nan').
             return obj.tolist()
-        if isinstance(obj, (np.integer, np.int_)):
+        if JAX_AVAILABLE and isinstance(
+            obj, jax.Array
+        ):  # Ensure JAX arrays are handled if not pre-converted
+            return np.array(obj).tolist()
+        # Check for numpy scalar types
+        if isinstance(obj, np.integer):  # Catches all numpy integer types
             return int(obj)
-        if isinstance(obj, (np.floating, np.float_)):
+        if isinstance(
+            obj, np.floating
+        ):  # Catches all numpy float types (e.g. np.float32, np.float64)
+            if np.isnan(obj):
+                return None  # Convert np.nan to null
             return float(obj)
-        if isinstance(obj, (np.bool_)):
+        if isinstance(obj, np.bool_):
             return bool(obj)
+        # Handle standard Python float('nan') as well
+        if isinstance(obj, float) and np.isnan(obj):
+            return None  # Convert float('nan') to null
         return super().default(obj)
