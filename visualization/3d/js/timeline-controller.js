@@ -102,8 +102,8 @@ export class TimelineController {
         });
         
         // High value states
-        if (this.data.values) {
-            const valueThreshold = ss.quantile(this.data.values, 0.9);
+        if (this.data.values && window.ss) {
+            const valueThreshold = window.ss.quantile(this.data.values, 0.9);
             this.data.values.forEach((value, time) => {
                 if (value > valueThreshold) {
                     this.events.push({
@@ -214,6 +214,8 @@ export class TimelineController {
     }
     
     setTime(time) {
+        if (!this.data || this.duration === 0) return;
+        
         this.currentTime = Math.max(0, Math.min(time, this.duration - 1));
         this.update();
         
@@ -277,7 +279,7 @@ export class TimelineController {
     }
     
     onMouseMove(e) {
-        if (!this.isDragging) return;
+        if (!this.isDragging || !this.data) return;
         
         const rect = this.container.getBoundingClientRect();
         const x = e.clientX - rect.left;
@@ -294,7 +296,7 @@ export class TimelineController {
     }
     
     onClick(e) {
-        if (e.target === this.handle) return;
+        if (e.target === this.handle || !this.data) return;
         
         const rect = this.container.getBoundingClientRect();
         const x = e.clientX - rect.left;

@@ -30,36 +30,53 @@ def check_dependencies():
         print("  uv sync --extra visualization")
         return False
 
-def start_server():
-    """Start the FastAPI server"""
-    server_path = Path(__file__).parent / "server.py"
+def start_servers():
+    """Start both the API server and static file server"""
+    processes = []
     
-    # Start server process
-    process = subprocess.Popen(
-        [sys.executable, str(server_path)],
+    # Start API server
+    api_server_path = Path(__file__).parent / "server.py"
+    api_process = subprocess.Popen(
+        [sys.executable, str(api_server_path)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True
     )
+    processes.append(api_process)
     
-    # Wait for server to start
-    print("Starting visualization server...")
-    time.sleep(2)
+    # Start static file server
+    static_server_path = Path(__file__).parent / "simple_server.py"
+    static_process = subprocess.Popen(
+        [sys.executable, str(static_server_path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
+    )
+    processes.append(static_process)
     
-    # Check if server started successfully
-    if process.poll() is not None:
-        stdout, stderr = process.communicate()
-        print("Server failed to start:")
-        print(stderr)
-        return None
-        
-    print("Server started successfully on http://localhost:8080")
-    return process
+    # Wait for servers to start
+    print("Starting visualization servers...")
+    time.sleep(3)
+    
+    # Check if servers started successfully
+    for i, process in enumerate(processes):
+        if process.poll() is not None:
+            stdout, stderr = process.communicate()
+            print(f"Server {i} failed to start:")
+            print(stderr)
+            # Kill other process
+            for p in processes:
+                if p.poll() is None:
+                    p.terminate()
+            return None
+    
+    print("API server started on http://localhost:8080")
+    print("Static server started on http://localhost:8081")
+    return processes
 
 def open_browser():
     """Open the visualization in the default browser"""
-    html_path = Path(__file__).parent / "index.html"
-    url = f"file://{html_path.absolute()}"
+    url = "http://localhost:8081/index.html"
     
     print(f"Opening visualization at: {url}")
     webbrowser.open(url)
@@ -73,9 +90,9 @@ def main():
     if not check_dependencies():
         sys.exit(1)
     
-    # Start server
-    server_process = start_server()
-    if not server_process:
+    # Start servers
+    server_processes = start_servers()
+    if not server_processes:
         sys.exit(1)
     
     # Open browser
@@ -83,21 +100,27 @@ def main():
     open_browser()
     
     print("\nVisualization is running!")
-    print("Press Ctrl+C to stop the server and exit.\n")
+    print("Press Ctrl+C to stop the servers and exit.\n")
     
     # Keep running until interrupted
     try:
         while True:
-            # Check if server is still running
-            if server_process.poll() is not None:
-                print("Server stopped unexpectedly")
-                break
+            # Check if servers are still running
+            for process in server_processes:
+                if process.poll() is not None:
+                    print("A server stopped unexpectedly")
+                    # Stop all servers
+                    for p in server_processes:
+                        if p.poll() is None:
+                            p.terminate()
+                    return
             time.sleep(1)
     except KeyboardInterrupt:
         print("\n\nShutting down...")
-        server_process.terminate()
-        server_process.wait(timeout=5)
-        print("Server stopped.")
+        for process in server_processes:
+            process.terminate()
+            process.wait(timeout=5)
+        print("Servers stopped.")
 
 if __name__ == "__main__":
     main()

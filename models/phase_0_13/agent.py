@@ -329,7 +329,7 @@ def _agent_simulation_step(
     key: random.PRNGKey,
     params: NetworkParams,
     constants: PrecomputedConstants,
-) -> Tuple[AgentState, int, jnp.ndarray]:
+) -> tuple[AgentState, int, jnp.ndarray]:
     """A single, fully JIT'd step of the agent's simulation and learning."""
     encode_key, neuron_key, action_key = random.split(key, 3)
 

@@ -20,7 +20,7 @@ import numpy as np
 from fastapi import FastAPI, WebSocket, HTTPException, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 import msgpack
 import lz4.frame
 
@@ -37,6 +37,8 @@ WS_HEARTBEAT_INTERVAL = 30  # WebSocket heartbeat interval in seconds
 
 class ExperimentInfo(BaseModel):
     """Basic experiment metadata"""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    
     experiment_id: str
     timestamp: datetime
     num_episodes: int
@@ -207,12 +209,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount static files
+from fastapi.staticfiles import StaticFiles
+import os
+static_dir = Path(__file__).parent
+app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
 
 @app.get("/api/experiments")
 async def list_experiments() -> List[ExperimentInfo]:
     """List all available experiments with metadata"""
-    base_path = Path("../../experiments")
+    base_path = Path(__file__).parent.parent.parent / "experiments"
     experiments = []
+    
+    logger.info(f"Looking for experiments in: {base_path}")
     
     for phase_dir in sorted(base_path.glob("phase_*")):
         for exp_dir in sorted(phase_dir.glob("snn_agent_*")):
@@ -223,19 +233,60 @@ async def list_experiments() -> List[ExperimentInfo]:
             try:
                 # Quick metadata extraction
                 with h5py.File(exp_file, 'r') as f:
-                    config = json.loads(f.attrs.get('config', '{}'))
+                    # Get config from group or attributes
+                    config = {}
+                    if 'config' in f:
+                        # Config is a group, extract its attributes
+                        config = dict(f['config'].attrs)
+                    elif 'config' in f.attrs:
+                        # Config is in attributes
+                        try:
+                            config = json.loads(f.attrs['config'])
+                        except:
+                            pass
+                    
+                    # Get number of episodes
+                    num_episodes = 0
+                    if 'episodes' in f:
+                        episodes_group = f['episodes']
+                        num_episodes = len([k for k in episodes_group.keys() if k.startswith('episode_')])
+                    
+                    # Calculate total duration
+                    duration = 0
+                    if 'episodes' in f:
+                        for ep_key in f['episodes'].keys():
+                            if ep_key.startswith('episode_'):
+                                if 'behavior' in f['episodes'][ep_key]:
+                                    behavior = f['episodes'][ep_key]['behavior']
+                                    if 'timesteps' in behavior:
+                                        duration += len(behavior['timesteps'][:])
+                    
+                    # Extract timestamp from directory name
+                    timestamp_str = exp_dir.name.split('_')[-1]
+                    try:
+                        # Convert YYYYMMDD_HHMMSS to datetime object
+                        timestamp = datetime.strptime(timestamp_str, '%Y%m%d')
+                    except:
+                        # Try with time included
+                        try:
+                            # Get last two parts for date and time
+                            parts = exp_dir.name.split('_')
+                            if len(parts) >= 2:
+                                date_time_str = parts[-2] + parts[-1]
+                                timestamp = datetime.strptime(date_time_str, '%Y%m%d%H%M%S')
+                            else:
+                                timestamp = datetime.now()
+                        except:
+                            timestamp = datetime.now()
                     
                     info = ExperimentInfo(
                         experiment_id=exp_dir.name,
-                        timestamp=datetime.fromisoformat(
-                            exp_dir.name.split('_')[-1].replace('_', 'T')
-                        ),
-                        num_episodes=len(f.keys()),
+                        timestamp=timestamp,
+                        num_episodes=num_episodes,
                         config=config,
                         grid_size=tuple(config.get('grid_size', [10, 10])),
-                        num_neurons=config.get('num_neurons', 1000),
-                        duration=sum(len(f[ep]['trajectory/x'][:]) 
-                                   for ep in f.keys() if ep.startswith('episode_'))
+                        num_neurons=attrs.get('n_neurons', config.get('num_neurons', 1000)),
+                        duration=float(duration)
                     )
                     experiments.append(info)
                     
@@ -252,19 +303,42 @@ async def get_trajectory(
     decimation: int = Query(1, ge=1, le=100)
 ) -> JSONResponse:
     """Get trajectory data for a specific episode"""
-    exp_path = Path(f"../../experiments/{experiment_id}/experiment_data.h5")
+    # Find the experiment directory
+    base_path = Path(__file__).parent.parent.parent / "experiments"
+    exp_path = None
+    
+    # Search for the experiment in all phase directories
+    for phase_dir in base_path.glob("phase_*"):
+        candidate = phase_dir / experiment_id / "experiment_data.h5"
+        if candidate.exists():
+            exp_path = candidate
+            break
+    
+    if not exp_path:
+        raise HTTPException(status_code=404, detail=f"Experiment {experiment_id} not found")
     
     data_file = await cache.get(exp_path)
-    episode_key = f"episode_{episode_id}"
+    episode_key = f"episode_{episode_id:04d}"
     
-    if episode_key not in data_file:
+    # Navigate to the correct location in the HDF5 structure
+    if 'episodes' not in data_file:
+        raise HTTPException(status_code=404, detail="No episodes found in experiment")
+        
+    episodes_group = data_file['episodes']
+    if episode_key not in episodes_group:
         raise HTTPException(status_code=404, detail=f"Episode {episode_id} not found")
         
-    episode = data_file[episode_key]
+    episode = episodes_group[episode_key]
     
-    # Extract trajectory data
-    x = episode['trajectory/x'][:]
-    y = episode['trajectory/y'][:]
+    # Extract trajectory data from behavior group
+    if 'behavior' not in episode:
+        raise HTTPException(status_code=404, detail="No behavior data found")
+        
+    behavior = episode['behavior']
+    
+    # Get position data
+    x = behavior['pos_x'][:] if 'pos_x' in behavior else np.array([])
+    y = behavior['pos_y'][:] if 'pos_y' in behavior else np.array([])
     
     # Apply decimation if needed
     if decimation > 1 and len(x) > DECIMATION_THRESHOLD:
@@ -272,9 +346,20 @@ async def get_trajectory(
         x = x[indices]
         y = y[indices]
         
-    # Get rewards and values
-    rewards = episode.get('rewards', np.zeros(len(x)))[:]
-    values = episode.get('values', np.zeros(len(x)))[:]
+    # Extract rewards from events
+    rewards = np.zeros(len(x))
+    if 'events' in episode:
+        events_group = episode['events']
+        for event_key in events_group.keys():
+            if 'reward_collected' in event_key:
+                event = events_group[event_key]
+                timestep = event.attrs.get('timestep', -1)
+                value = event.attrs.get('value', 1.0)
+                if 0 <= timestep < len(rewards):
+                    rewards[timestep] = value
+    
+    # Values not present in current data format, use zeros
+    values = np.zeros(len(x))
     
     return JSONResponse({
         "trajectory": {
@@ -297,15 +382,37 @@ async def websocket_stream(websocket: WebSocket, experiment_id: str):
     await websocket.accept()
     
     try:
-        exp_path = Path(f"../../experiments/{experiment_id}/experiment_data.h5")
+        # Find the experiment path
+        base_path = Path(__file__).parent.parent.parent / "experiments"
+        exp_path = None
+        
+        for phase_dir in base_path.glob("phase_*"):
+            candidate = phase_dir / experiment_id / "experiment_data.h5"
+            if candidate.exists():
+                exp_path = candidate
+                break
+        
+        if not exp_path:
+            await websocket.send_json({
+                "type": "error",
+                "message": f"Experiment {experiment_id} not found"
+            })
+            await websocket.close()
+            return
+            
         data_file = await cache.get(exp_path)
+        
+        # Get episode list
+        episodes = []
+        if 'episodes' in data_file:
+            episodes = [k for k in data_file['episodes'].keys() if k.startswith('episode_')]
         
         # Send initial metadata
         await websocket.send_json({
             "type": "metadata",
             "data": {
                 "experiment_id": experiment_id,
-                "episodes": list(data_file.keys())
+                "episodes": episodes
             }
         })
         
@@ -336,60 +443,109 @@ async def handle_data_request(websocket: WebSocket,
                             data_file: h5py.File, 
                             request: Dict[str, Any]):
     """Handle specific data request over WebSocket"""
-    episode_key = f"episode_{request['episode_id']}"
+    episode_key = f"episode_{request['episode_id']:04d}"
     data_type = request['data_type']
     
-    if episode_key not in data_file:
+    # Navigate to episodes group
+    if 'episodes' not in data_file:
+        await websocket.send_json({
+            "type": "error",
+            "message": "No episodes found in experiment"
+        })
+        return
+        
+    episodes_group = data_file['episodes']
+    if episode_key not in episodes_group:
         await websocket.send_json({
             "type": "error",
             "message": f"Episode not found: {episode_key}"
         })
         return
         
-    episode = data_file[episode_key]
+    episode = episodes_group[episode_key]
     processor = DataProcessor()
     
     if data_type == "neural":
         # Stream neural data in chunks
-        spikes = episode['neural/spikes'][:]
-        spike_rates = processor.compute_spike_rates(spikes)
-        
-        # Send in chunks
-        for i in range(0, len(spike_rates), CHUNK_SIZE):
-            chunk = spike_rates[i:i + CHUNK_SIZE]
+        if 'neural_states' in episode and 'spikes' in episode['neural_states']:
+            spikes = episode['neural_states']['spikes'][:]
+            spike_rates = processor.compute_spike_rates(spikes)
             
-            # Compress data
-            compressed = lz4.frame.compress(
-                msgpack.packb({
+            # Send in chunks
+            for i in range(0, len(spike_rates), CHUNK_SIZE):
+                chunk = spike_rates[i:i + CHUNK_SIZE]
+                
+                # Send data without LZ4 compression for now
+                data = msgpack.packb({
                     "time_start": i,
                     "time_end": i + len(chunk),
                     "data": chunk.tolist()
                 })
-            )
-            
-            await websocket.send_bytes(compressed)
-            await asyncio.sleep(0.01)  # Prevent overwhelming client
+                
+                await websocket.send_bytes(data)
+                await asyncio.sleep(0.01)  # Prevent overwhelming client
+        else:
+            await websocket.send_json({
+                "type": "error",
+                "message": "No neural data found"
+            })
             
     elif data_type == "trajectory":
         # Send trajectory segments
-        positions = np.column_stack([
-            episode['trajectory/x'][:],
-            episode['trajectory/y'][:]
-        ])
-        rewards = episode.get('rewards', np.zeros(len(positions)))[:]
-        
-        segments = processor.extract_trajectory_segments(positions, rewards)
-        
-        await websocket.send_json({
-            "type": "trajectory_segments",
-            "data": segments
-        })
+        if 'behavior' in episode:
+            behavior = episode['behavior']
+            if 'pos_x' in behavior and 'pos_y' in behavior:
+                positions = np.column_stack([
+                    behavior['pos_x'][:],
+                    behavior['pos_y'][:]
+                ])
+                
+                # Extract rewards from events
+                rewards = np.zeros(len(positions))
+                if 'events' in episode:
+                    events_group = episode['events']
+                    for event_key in events_group.keys():
+                        if 'reward_collected' in event_key:
+                            event = events_group[event_key]
+                            timestep = event.attrs.get('timestep', -1)
+                            value = event.attrs.get('value', 1.0)
+                            if 0 <= timestep < len(rewards):
+                                rewards[timestep] = value
+                
+                segments = processor.extract_trajectory_segments(positions, rewards)
+                
+                await websocket.send_json({
+                    "type": "trajectory_segments",
+                    "data": segments
+                })
+            else:
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "No position data found"
+                })
+        else:
+            await websocket.send_json({
+                "type": "error",
+                "message": "No behavior data found"
+            })
 
 
 @app.get("/api/experiment/{experiment_id}/analysis")
 async def get_analysis(experiment_id: str) -> JSONResponse:
     """Get pre-computed analysis for an experiment"""
-    exp_path = Path(f"../../experiments/{experiment_id}/experiment_data.h5")
+    # Find the experiment path
+    base_path = Path(__file__).parent.parent.parent / "experiments"
+    exp_path = None
+    
+    for phase_dir in base_path.glob("phase_*"):
+        candidate = phase_dir / experiment_id / "experiment_data.h5"
+        if candidate.exists():
+            exp_path = candidate
+            break
+    
+    if not exp_path:
+        raise HTTPException(status_code=404, detail=f"Experiment {experiment_id} not found")
+        
     data_file = await cache.get(exp_path)
     
     analysis = {
@@ -405,18 +561,40 @@ async def get_analysis(experiment_id: str) -> JSONResponse:
     total_rewards = []
     episode_lengths = []
     
-    for episode_key in sorted(data_file.keys()):
+    if 'episodes' not in data_file:
+        return JSONResponse(analysis)
+        
+    episodes_group = data_file['episodes']
+    
+    for episode_key in sorted(episodes_group.keys()):
         if not episode_key.startswith('episode_'):
             continue
             
-        episode = data_file[episode_key]
-        rewards = episode.get('rewards', np.array([]))[:]
+        episode = episodes_group[episode_key]
+        
+        # Get episode length from behavior data
+        episode_length = 0
+        if 'behavior' in episode and 'timesteps' in episode['behavior']:
+            episode_length = len(episode['behavior']['timesteps'][:])
+        
+        # Extract rewards from events
+        total_reward = 0
+        reward_count = 0
+        if 'events' in episode:
+            events_group = episode['events']
+            for event_key in events_group.keys():
+                if 'reward_collected' in event_key:
+                    event = events_group[event_key]
+                    value = event.attrs.get('value', 1.0)
+                    total_reward += value
+                    reward_count += 1
         
         ep_analysis = {
             "episode_id": int(episode_key.split('_')[1]),
-            "total_reward": float(rewards.sum()),
-            "episode_length": len(rewards),
-            "reward_rate": float(rewards.sum() / len(rewards)) if len(rewards) > 0 else 0
+            "total_reward": float(total_reward),
+            "episode_length": episode_length,
+            "reward_rate": float(total_reward / episode_length) if episode_length > 0 else 0,
+            "reward_count": reward_count
         }
         
         analysis["episodes"].append(ep_analysis)
@@ -424,14 +602,15 @@ async def get_analysis(experiment_id: str) -> JSONResponse:
         episode_lengths.append(ep_analysis["episode_length"])
         
     # Compute aggregates
-    analysis["aggregate"]["total_episodes"] = len(analysis["episodes"])
-    analysis["aggregate"]["avg_reward"] = float(np.mean(total_rewards))
-    analysis["aggregate"]["avg_episode_length"] = float(np.mean(episode_lengths))
-    
-    # Learning curve (cumulative average)
-    cumsum = np.cumsum(total_rewards)
-    counts = np.arange(1, len(total_rewards) + 1)
-    analysis["aggregate"]["learning_curve"] = (cumsum / counts).tolist()
+    if len(analysis["episodes"]) > 0:
+        analysis["aggregate"]["total_episodes"] = len(analysis["episodes"])
+        analysis["aggregate"]["avg_reward"] = float(np.mean(total_rewards))
+        analysis["aggregate"]["avg_episode_length"] = float(np.mean(episode_lengths))
+        
+        # Learning curve (cumulative average)
+        cumsum = np.cumsum(total_rewards)
+        counts = np.arange(1, len(total_rewards) + 1)
+        analysis["aggregate"]["learning_curve"] = (cumsum / counts).tolist()
     
     return JSONResponse(analysis)
 

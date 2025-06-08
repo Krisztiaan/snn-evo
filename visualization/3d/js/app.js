@@ -277,6 +277,8 @@ class SNNVisualizationApp {
     }
     
     updateVisualization() {
+        if (!this.state.data) return;
+        
         const time = Math.floor(this.state.currentTime);
         
         // Update 3D viewport
@@ -293,6 +295,12 @@ class SNNVisualizationApp {
     }
     
     updateTimeDisplay() {
+        if (!this.state.data || !this.state.data.trajectory) {
+            document.getElementById('time-display').textContent = '0:00';
+            document.getElementById('time-total').textContent = '0:00';
+            return;
+        }
+        
         const currentSec = Math.floor(this.state.currentTime / 1000);
         const totalSec = Math.floor(this.state.data.trajectory.x.length / 1000);
         

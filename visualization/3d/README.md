@@ -28,7 +28,7 @@ A high-performance, modular visualization system for analyzing Spiking Neural Ne
 ## Installation
 
 ### Requirements
-- Python 3.8+
+- Python 3.10+
 - Modern web browser with WebGL support
 
 ### Setup
@@ -39,6 +39,18 @@ uv sync --extra visualization
 # Launch the visualization
 cd visualization/3d
 python launch.py
+```
+
+### Alternative: Manual Server Start
+If you encounter issues with the launcher:
+```bash
+# Terminal 1: Start API server
+python server.py
+
+# Terminal 2: Start static file server
+python simple_server.py
+
+# Open browser to http://localhost:8081/index.html
 ```
 
 ## Usage

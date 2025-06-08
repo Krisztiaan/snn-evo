@@ -118,7 +118,7 @@ export class ChartManager {
         const canvas = document.getElementById('reward-chart');
         const ctx = canvas.getContext('2d');
         
-        this.charts.reward = new Chart(ctx, {
+        this.charts.reward = new window.Chart(ctx, {
             type: this.chartConfigs.reward.type,
             data: {
                 datasets: [{
@@ -144,7 +144,7 @@ export class ChartManager {
         const canvas = document.getElementById('value-chart');
         const ctx = canvas.getContext('2d');
         
-        this.charts.value = new Chart(ctx, {
+        this.charts.value = new window.Chart(ctx, {
             type: this.chartConfigs.value.type,
             data: {
                 datasets: [{
@@ -170,7 +170,7 @@ export class ChartManager {
         const canvas = document.getElementById('connectivity-chart');
         const ctx = canvas.getContext('2d');
         
-        this.charts.connectivity = new Chart(ctx, {
+        this.charts.connectivity = new window.Chart(ctx, {
             type: this.chartConfigs.connectivity.type,
             data: {
                 labels: [],
@@ -213,7 +213,7 @@ export class ChartManager {
         };
         
         // Register plugin globally
-        Chart.register(timeMarkerPlugin);
+        window.Chart.register(timeMarkerPlugin);
     }
     
     setEpisodeData(data) {
@@ -325,6 +325,12 @@ export class ChartManager {
     computeMetrics() {
         if (!this.data) return;
         
+        // Check if simple-statistics is loaded
+        if (!window.ss) {
+            console.warn('Simple-statistics library not loaded');
+            return;
+        }
+        
         const metrics = {
             totalReward: 0,
             rewardRate: 0,
@@ -341,8 +347,8 @@ export class ChartManager {
         
         // Value function metrics
         if (this.data.values) {
-            metrics.averageValue = ss.mean(this.data.values);
-            metrics.valueVariance = ss.variance(this.data.values);
+            metrics.averageValue = window.ss.mean(this.data.values);
+            metrics.valueVariance = window.ss.variance(this.data.values);
         }
         
         // Exploration metrics
@@ -356,8 +362,8 @@ export class ChartManager {
         // Neural metrics
         if (this.data.neural && this.data.neural.spikes) {
             const firingRates = this.calculateFiringRates(this.data.neural.spikes);
-            metrics.peakFiringRate = ss.max(firingRates);
-            metrics.averageFiringRate = ss.mean(firingRates);
+            metrics.peakFiringRate = window.ss.max(firingRates);
+            metrics.averageFiringRate = window.ss.mean(firingRates);
         }
         
         this.metrics = metrics;
@@ -391,8 +397,14 @@ export class ChartManager {
     }
     
     createHistogram(data, bins) {
-        const min = ss.min(data);
-        const max = ss.max(data);
+        // Check if simple-statistics is loaded
+        if (!window.ss) {
+            console.warn('Simple-statistics library not loaded');
+            return { labels: [], counts: [] };
+        }
+        
+        const min = window.ss.min(data);
+        const max = window.ss.max(data);
         const binWidth = (max - min) / bins;
         
         const labels = [];
