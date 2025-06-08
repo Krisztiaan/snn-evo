@@ -37,7 +37,7 @@ def benchmark_world(world_class, config, n_steps=10000, warmup_steps=100):
 
     # Time reset (average of 100 resets)
     reset_times = []
-    for i in range(100):
+    for _i in range(100):
         key, subkey = random.split(key)
         reset_start = time.perf_counter()
         state, obs = world.reset(subkey)

@@ -113,19 +113,17 @@ class TestDataExporter:
     def test_edge_cases(self, temp_dir: Path):
         """Test edge cases like empty episodes and missing data."""
         # Empty episode
-        with DataExporter("test_empty", temp_dir) as e:
-            with e.start_episode(0):
-                pass  # No data logged
+        with DataExporter("test_empty", temp_dir) as e, e.start_episode(0):
+            pass  # No data logged
 
         with ExperimentLoader(next(temp_dir.glob("test_empty_*"))) as loader:
             summary = loader.get_episode(0).get_metadata()
             assert summary["total_timesteps"] == 0
 
         # Missing optional fields
-        with DataExporter("test_missing", temp_dir) as e:
-            with e.start_episode(0) as ep:
-                ep.log_timestep(timestep=0, neural_state={"v": np.ones(10)})
-                ep.log_timestep(timestep=1, behavior={"pos": [1, 2]})
+        with DataExporter("test_missing", temp_dir) as e, e.start_episode(0) as ep:
+            ep.log_timestep(timestep=0, neural_state={"v": np.ones(10)})
+            ep.log_timestep(timestep=1, behavior={"pos": [1, 2]})
 
         with ExperimentLoader(next(temp_dir.glob("test_missing_*"))) as loader:
             ep_data = loader.get_episode(0)

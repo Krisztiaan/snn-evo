@@ -251,7 +251,7 @@ class SnnAgent:
         # Re-initialize agent state for each episode
         self.state = self._initialize_state(episode_key)
 
-        ep = exporter.start_episode(episode_num)
+        exporter.start_episode(episode_num)
         exporter.log_static_episode_data(
             "world_setup", {"reward_positions": np.array(world_state.reward_positions)}
         )

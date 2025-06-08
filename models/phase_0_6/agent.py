@@ -281,7 +281,7 @@ class SnnAgent:
         world_state, obs = self.world.reset(episode_key)
         self.state = self._initialize_state(episode_key)
 
-        ep = exporter.start_episode(episode_num)
+        exporter.start_episode(episode_num)
         exporter.log_static_episode_data(
             "world_setup", {"reward_positions": np.array(world_state.reward_positions)}
         )

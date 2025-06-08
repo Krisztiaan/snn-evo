@@ -41,7 +41,7 @@ def optimize_jax_conversion(data: Dict[str, Any]) -> Dict[str, np.ndarray]:
 
     if arrays:
         numpy_arrays = jax.device_get(arrays)
-        result = {k: v for k, v in zip(keys, numpy_arrays)}
+        result = dict(zip(keys, numpy_arrays))
         result.update(non_arrays)
         return result
     return non_arrays

@@ -149,12 +149,12 @@ def main():
 
     # Create large world
     big_config = WorldConfig(grid_size=500, n_rewards=100)
-    baseline_world = BaselineWorld(big_config)
+    BaselineWorld(big_config)
     baseline_world_mem = process.memory_info().rss / 1024 / 1024 - baseline_mem
 
     # JAX world
     gc.collect()
-    jax_world = JAXWorld(big_config)
+    JAXWorld(big_config)
     jax_world_mem = process.memory_info().rss / 1024 / 1024 - baseline_mem - baseline_world_mem
 
     print(f"Baseline world memory: {baseline_world_mem:.1f} MB")

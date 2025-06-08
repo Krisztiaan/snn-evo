@@ -78,7 +78,7 @@ def gradient_following_agent(key: random.PRNGKey, n_steps: int = 1000):
     # Store path for visualization
     path = [state.agent_pos]
 
-    for step in range(n_steps):
+    for _step in range(n_steps):
         # Try each action and pick the one with highest gradient
         best_action = 0
         best_gradient = -1.0

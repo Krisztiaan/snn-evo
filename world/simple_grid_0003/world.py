@@ -2,7 +2,7 @@
 """Ultra-optimized JAX grid world with packed positions and simplified algorithms."""
 
 from functools import partial
-from typing import Tuple
+from typing import Optional, Tuple
 
 import jax.numpy as jnp
 from jax import Array, jit, random
@@ -26,7 +26,7 @@ class SimpleGridWorld:
     VERSION = "0.0.3-ultra"
     DESCRIPTION = "Ultra-optimized toroidal grid environment for maximum performance"
 
-    def __init__(self, config: WorldConfig = None, grid_size: int = None):
+    def __init__(self, config: Optional[WorldConfig] = None, grid_size: Optional[int] = None):
         if config is None:
             config = WorldConfig(grid_size=grid_size if grid_size is not None else 100)
         elif grid_size is not None:

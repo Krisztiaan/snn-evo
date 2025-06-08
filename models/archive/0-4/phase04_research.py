@@ -426,7 +426,7 @@ def apply_dale_principle_correct(w: jnp.ndarray, is_excitatory: jnp.ndarray) -> 
     """
     # Create masks for neuron types (pre-synaptic = rows)
     E_pre = is_excitatory[:, None]  # Shape: (N, 1)
-    I_pre = ~is_excitatory[:, None]  # Shape: (N, 1)
+    ~is_excitatory[:, None]  # Shape: (N, 1)
 
     # Apply sign constraints based on pre-synaptic neuron type
     # E neurons: all outgoing weights positive

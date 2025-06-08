@@ -177,7 +177,7 @@ class ExperimentAPIHandler(BaseHTTPRequestHandler):
                 if spike_data and "timesteps" in spike_data:
                     spike_timesteps = spike_data["timesteps"]
                     neuron_ids = spike_data.get("neuron_ids", spike_data.get("values", []))
-                    for t, neuron_id in zip(spike_timesteps, neuron_ids):
+                    for t, _neuron_id in zip(spike_timesteps, neuron_ids):
                         spike_counts_per_timestep[t] = spike_counts_per_timestep.get(t, 0) + 1
 
                 # If no sparse spike data, check for dense spike data in neural_states

@@ -377,7 +377,7 @@ def neuron_step_enhanced(
 
     # Add incoming spikes to synaptic currents
     spike_input = state.spike.astype(float)
-    syn_input = jnp.dot(state.w, spike_input)
+    jnp.dot(state.w, spike_input)
 
     # Separate E/I currents based on pre-synaptic type
     E_mask = state.is_excitatory[:, None]

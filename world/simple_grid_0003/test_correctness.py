@@ -126,7 +126,7 @@ def test_observation_gradient():
     ]
 
     for pos in positions:
-        test_state = state._replace(agent_pos=pos)
+        state._replace(agent_pos=pos)
         _, test_obs = world.reset(key)  # Get fresh observation
         # Manually calculate observation for test state
         agent_packed = pos[0] * world.grid_size + pos[1]

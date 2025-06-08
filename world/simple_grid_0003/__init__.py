@@ -8,7 +8,8 @@ Just change your import:
     from simple_grid_0003 import SimpleGridWorld, WorldConfig
 """
 
-from ..simple_grid_0001.types import Observation, StepResult, WorldConfig, WorldState
+from world.simple_grid_0001.types import Observation, StepResult, WorldConfig, WorldState
+
 from .world import SimpleGridWorld
 
 __version__ = "0.3.0"

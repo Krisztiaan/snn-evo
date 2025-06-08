@@ -50,7 +50,7 @@ def test_jit_compilation():
 
     # Second call (compiled)
     start = time.time()
-    result2 = world.step(result1.state, 1, random.PRNGKey(3))
+    world.step(result1.state, 1, random.PRNGKey(3))
     second_time = time.time() - start
     print(f"   Second call (compiled): {second_time * 1000:.2f}ms")
     print(f"   Speedup: {first_time / second_time:.1f}x")

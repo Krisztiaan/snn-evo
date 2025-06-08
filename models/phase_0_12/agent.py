@@ -445,8 +445,8 @@ def _initialize_weights(
     sens_indices = jnp.where(neuron_types == 0)[0]
     proc_indices = jnp.where(neuron_types == 1)[0]
 
-    for i, sens_idx in enumerate(sens_indices):
-        for j, proc_idx in enumerate(proc_indices):
+    for _i, sens_idx in enumerate(sens_indices):
+        for _j, proc_idx in enumerate(proc_indices):
             if w_mask[proc_idx, n_in + sens_idx]:
                 w_val = jnp.abs(
                     random.normal(keys[1], ()) * params.W_SENSORY_PROC * params.W_INIT_SCALE
@@ -455,8 +455,8 @@ def _initialize_weights(
                 w = w.at[proc_idx, n_in + sens_idx].set(w_val)
 
     # 3. Processing ↔ Processing weights
-    for i, src_idx in enumerate(proc_indices):
-        for j, tgt_idx in enumerate(proc_indices):
+    for _i, src_idx in enumerate(proc_indices):
+        for _j, tgt_idx in enumerate(proc_indices):
             if w_mask[tgt_idx, n_in + src_idx]:
                 # Weight based on connection type
                 if is_excitatory[src_idx] and is_excitatory[tgt_idx]:  # E→E
@@ -473,9 +473,9 @@ def _initialize_weights(
 
     # 4. Processing → Readout weights
     readout_indices = jnp.where(neuron_types == 2)[0]
-    for i, src_idx in enumerate(proc_indices):
+    for _i, src_idx in enumerate(proc_indices):
         if is_excitatory[src_idx]:  # Only E neurons
-            for j, tgt_idx in enumerate(readout_indices):
+            for _j, tgt_idx in enumerate(readout_indices):
                 if w_mask[tgt_idx, n_in + src_idx]:
                     w_val = jnp.abs(
                         random.normal(keys[3], ()) * params.W_PROC_READOUT * params.W_INIT_SCALE
@@ -762,7 +762,7 @@ class SnnAgent:
 
         # Start data export (skip in performance mode)
         if not performance_mode and exporter is not None:
-            ep = exporter.start_episode(episode_num)
+            exporter.start_episode(episode_num)
             exporter.log_static_episode_data(
                 "world_setup", {"reward_positions": np.asarray(world_state.reward_positions)}
             )
@@ -940,7 +940,7 @@ class SnnAgent:
         # Run episodes
         all_summaries = []
         episode_times = []
-        experiment_start_time = time.time()
+        time.time()
 
         for i in range(self.config.exp_config.n_episodes):
             print(f"\n--- Episode {i + 1}/{self.config.exp_config.n_episodes} ---")
@@ -967,16 +967,12 @@ class SnnAgent:
                     episode_eta = 0
 
                 # Total experiment ETA
-                completed_episodes = i
                 remaining_episodes = self.config.exp_config.n_episodes - i - 1
 
                 if episode_times:
                     avg_episode_time = sum(episode_times) / len(episode_times)
                 else:
-                    if step > 0:
-                        avg_episode_time = (episode_elapsed / (step + 1)) * max_steps
-                    else:
-                        avg_episode_time = 60
+                    avg_episode_time = episode_elapsed / (step + 1) * max_steps if step > 0 else 60
 
                 total_eta = episode_eta + (remaining_episodes * avg_episode_time)
 

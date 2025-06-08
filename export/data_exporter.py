@@ -167,7 +167,7 @@ class DataExporter:
         if self.config["validate_data"]:
             warnings_list = validate_network_structure(neurons, connections)
             for w in warnings_list:
-                warnings.warn(f"Network validation: {w}")
+                warnings.warn(f"Network validation: {w}", stacklevel=2)
 
         with _HDF5_LOCK:
             net_group = self.h5_file.create_group("network_structure")
@@ -190,7 +190,10 @@ class DataExporter:
     def start_episode(self, episode_id: Optional[int] = None) -> Episode:
         """Start a new episode."""
         if self.current_episode is not None:
-            warnings.warn(f"Previous episode {self.current_episode.episode_id} not ended cleanly.")
+            warnings.warn(
+                f"Previous episode {self.current_episode.episode_id} not ended cleanly.",
+                stacklevel=2,
+            )
             self.current_episode.end(success=False)
 
         if episode_id is None:
@@ -222,7 +225,7 @@ class DataExporter:
     def end_episode(self, success: bool = False, summary: Optional[Dict[str, Any]] = None) -> None:
         """End the current episode and save summary."""
         if self.current_episode is None:
-            warnings.warn("No active episode to end.")
+            warnings.warn("No active episode to end.", stacklevel=2)
             return
 
         self.current_episode.end(success=success)

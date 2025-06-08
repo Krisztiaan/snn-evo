@@ -66,7 +66,7 @@ class BufferedDataset:
 
         item_shape = shape[1:] if len(shape) > 1 else ()
         self.buffer_threshold = max(1, min(chunk_size // 10, DEFAULT_BUFFER_THRESHOLD))
-        self.buffer = np.empty((self.buffer_threshold,) + item_shape, dtype=dtype)
+        self.buffer = np.empty((self.buffer_threshold, *item_shape), dtype=dtype)
         self.buffer_pos = 0
         if self.memory_tracker:
             self.memory_tracker.add(self.buffer.nbytes)
@@ -75,11 +75,11 @@ class BufferedDataset:
             create_kwargs: Dict[str, Any] = {
                 "name": name,
                 "shape": shape,
-                "maxshape": (None,) + item_shape,
+                "maxshape": (None, *item_shape),
                 "dtype": dtype,
             }
             if all(s > 0 for s in shape):
-                create_kwargs["chunks"] = (min(chunk_size, self.buffer_threshold),) + item_shape
+                create_kwargs["chunks"] = (min(chunk_size, self.buffer_threshold), *item_shape)
                 if compression:
                     create_kwargs.update(
                         {"compression": compression, "shuffle": True, "fletcher32": True}
@@ -222,7 +222,7 @@ class Episode:
 
         for key, value in data.items():
             value_np = value if isinstance(value, np.ndarray) else ensure_numpy(value)
-            shape = (0,) if value_np.ndim == 0 else (0,) + value_np.shape
+            shape = (0,) if value_np.ndim == 0 else (0, *value_np.shape)
             writer = self.data_manager.get_or_create_dataset(group, key, value_np.dtype, shape)
             writer.append(value_np)
 

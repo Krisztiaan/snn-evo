@@ -1,7 +1,7 @@
 # keywords: [grid world, jax environment, simple navigation, toroidal grid]
 """Simple grid world implementation with JAX optimization."""
 
-from typing import Tuple
+from typing import Optional, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -25,7 +25,7 @@ class SimpleGridWorld:
     VERSION = "0.0.2"
     DESCRIPTION = "A toroidal grid navigation environment with dynamic reward respawning"
 
-    def __init__(self, config: WorldConfig = None, grid_size: int = None):
+    def __init__(self, config: WorldConfig = None, grid_size: Optional[int] = None):
         if config is None:
             config = WorldConfig(grid_size=grid_size if grid_size is not None else 100)
         elif grid_size is not None:
@@ -69,10 +69,7 @@ class SimpleGridWorld:
         new_pos = self._move_agent(state.agent_pos, action)
 
         # Use provided key or generate deterministic key from timestep
-        if key is None:
-            respawn_key = random.PRNGKey(state.timestep)
-        else:
-            respawn_key = key
+        respawn_key = random.PRNGKey(state.timestep) if key is None else key
 
         # Check reward collection and respawn
         reward, new_collected, new_reward_positions = self._collect_rewards(

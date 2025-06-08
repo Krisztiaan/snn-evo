@@ -25,14 +25,13 @@ def run_benchmark_scenario(output_dir: Path, experiment_name: str, **kwargs) -> 
     start_time = time.perf_counter()
     with DataExporter(
         experiment_name=experiment_name, output_base_dir=output_dir, **kwargs
-    ) as exporter:
-        with exporter.start_episode(0) as episode:
-            for t in range(1000):
-                episode.log_timestep(
-                    timestep=t,
-                    neural_state={"v": np.random.randn(1000)},
-                    behavior={"pos": np.random.randn(3)},
-                )
+    ) as exporter, exporter.start_episode(0) as episode:
+        for t in range(1000):
+            episode.log_timestep(
+                timestep=t,
+                neural_state={"v": np.random.randn(1000)},
+                behavior={"pos": np.random.randn(3)},
+            )
     return time.perf_counter() - start_time
 
 

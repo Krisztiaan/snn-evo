@@ -120,16 +120,16 @@ class StreamingDataLogger:
 if args.full_trace:
     logger = StreamingDataLogger(episode_dir)
     logger.initialize_streams(max_steps, params.NUM_NEURONS, NUM_REWARDS)
-    
+
     for step in range(max_steps):
         # ... existing code ...
-        
+
         # Log every timestep
         logger.log_timestep(step, state, env)
-        
+
         # Log weight changes (need to track in three_factor_update)
-        # ... 
-        
+        # ...
+
     logger.close()
 """
 

@@ -68,7 +68,7 @@ class RandomAgent:
         reset_key, action_key = random.split(key)
         state, obs = self.world.reset(reset_key)
 
-        ep = exporter.start_episode(episode_num)
+        exporter.start_episode(episode_num)
         exporter.log_static_episode_data(
             "world_setup", {"reward_positions": np.array(state.reward_positions)}
         )

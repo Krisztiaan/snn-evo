@@ -54,7 +54,7 @@ def main():
 
     # Run agent
     agent = RandomAgent(config)
-    results = agent.run()
+    agent.run()
 
     print("\nExperiment complete!")
 

@@ -2,7 +2,7 @@
 """Fully JAX-compatible grid world with static shapes and JIT compilation."""
 
 from functools import partial
-from typing import Tuple
+from typing import Optional, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -25,7 +25,7 @@ class SimpleGridWorld:
     VERSION = "0.0.2-jax"
     DESCRIPTION = "Fully JIT-compiled toroidal grid navigation environment"
 
-    def __init__(self, config: WorldConfig = None, grid_size: int = None):
+    def __init__(self, config: WorldConfig = None, grid_size: Optional[int] = None):
         if config is None:
             config = WorldConfig(grid_size=grid_size if grid_size is not None else 100)
         elif grid_size is not None:
