@@ -3,4 +3,5 @@
 from .agent import SnnAgent, OptimizedSnnAgent
 from .config import SnnAgentConfig, NetworkParams, ExperimentConfig
 
-__all__ = ['SnnAgent', 'OptimizedSnnAgent', 'SnnAgentConfig', 'NetworkParams', 'ExperimentConfig']
+__all__ = ['SnnAgent', 'OptimizedSnnAgent',
+           'SnnAgentConfig', 'NetworkParams', 'ExperimentConfig']

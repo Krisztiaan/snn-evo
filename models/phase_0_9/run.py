@@ -25,7 +25,7 @@ Phase 0.9 enhances learning speed with gradient-proportional dopamine:
 - Biologically motivated connectivity
         """
     )
-    
+
     parser.add_argument("--episodes", type=int, default=3,
                         help="Number of episodes to run (default: 3)")
     parser.add_argument("--steps", type=int, default=10000,
@@ -42,15 +42,15 @@ Phase 0.9 enhances learning speed with gradient-proportional dopamine:
                         help="Enable stability monitoring (default: True)")
     parser.add_argument("--no-monitor", action="store_false", dest="monitor",
                         help="Disable stability monitoring")
-    
+
     args = parser.parse_args()
-    
+
     # Quick test mode overrides
     if args.quick_test:
         args.episodes = 1
         args.steps = 1000
         print("🚀 Quick test mode: 1 episode, 1000 steps")
-    
+
     # Create configurations
     world_config = WorldConfig(max_timesteps=args.steps)
     network_params = NetworkParams()
@@ -63,17 +63,17 @@ Phase 0.9 enhances learning speed with gradient-proportional dopamine:
         monitor_weights=args.monitor,
         check_stability=args.monitor
     )
-    
+
     config = SnnAgentConfig(
         world_config=world_config,
         network_params=network_params,
         exp_config=exp_config
     )
-    
+
     # Create export directory
     if not args.no_export:
         Path(args.export_dir).mkdir(parents=True, exist_ok=True)
-    
+
     print("\n" + "="*60)
     print("🧠 Phase 0.9 SNN Agent - Gradient-Based Dopamine")
     print("="*60)
@@ -82,13 +82,15 @@ Phase 0.9 enhances learning speed with gradient-proportional dopamine:
     print(f"Random seed: {args.seed}")
     print(f"Data export: {'ENABLED' if not args.no_export else 'DISABLED'}")
     print(f"Stability monitoring: {'ON' if args.monitor else 'OFF'}")
-    
+
     print("\n📊 Network Architecture:")
     print(f"  - Sensory neurons: {network_params.NUM_SENSORY}")
-    print(f"  - Processing neurons: {network_params.NUM_PROCESSING} (80% E, 20% I)")
+    print(
+        f"  - Processing neurons: {network_params.NUM_PROCESSING} (80% E, 20% I)")
     print(f"  - Readout neurons: {network_params.NUM_READOUT}")
-    print(f"  - Total neurons: {network_params.NUM_SENSORY + network_params.NUM_PROCESSING + network_params.NUM_READOUT}")
-    
+    print(
+        f"  - Total neurons: {network_params.NUM_SENSORY + network_params.NUM_PROCESSING + network_params.NUM_READOUT}")
+
     print("\n🔧 Key Features:")
     print("  ✓ Gradient-proportional dopamine modulation")
     print("  ✓ Population-coded sensory input (16 channels)")
@@ -98,49 +100,54 @@ Phase 0.9 enhances learning speed with gradient-proportional dopamine:
     print("  ✓ Targeted plasticity (no learning on input weights)")
     print("  ✓ Soft weight bounds using tanh")
     print("="*60 + "\n")
-    
+
     # Initialize agent and run experiment
     start_time = time.time()
     agent = SnnAgent(config)
     all_summaries = agent.run_experiment()
     total_time = time.time() - start_time
-    
+
     # Aggregate results
     if len(all_summaries) > 1:
         print("\n" + "="*60)
         print("📈 Experiment Summary")
         print("="*60)
-        
+
         # Basic stats
         rewards = [s['total_reward'] for s in all_summaries]
         collected = [s['rewards_collected'] for s in all_summaries]
         rates = [s['mean_firing_rate'] for s in all_summaries]
-        
+
         print(f"Total Reward: {np.mean(rewards):.2f} ± {np.std(rewards):.2f}")
-        print(f"Rewards Collected: {np.mean(collected):.1f} ± {np.std(collected):.1f}")
-        print(f"Mean Firing Rate: {np.mean(rates):.1f} ± {np.std(rates):.1f} Hz")
-        
+        print(
+            f"Rewards Collected: {np.mean(collected):.1f} ± {np.std(collected):.1f}")
+        print(
+            f"Mean Firing Rate: {np.mean(rates):.1f} ± {np.std(rates):.1f} Hz")
+
         # Learning trend
         first_half = np.mean(rewards[:len(rewards)//2])
         second_half = np.mean(rewards[len(rewards)//2:])
         improvement = second_half - first_half
-        
+
         print(f"\n📊 Learning Progress:")
         print(f"First half avg: {first_half:.2f}")
         print(f"Second half avg: {second_half:.2f}")
-        print(f"Improvement: {improvement:+.2f} ({improvement/max(first_half, 0.1)*100:+.1f}%)")
-        
+        print(
+            f"Improvement: {improvement:+.2f} ({improvement/max(first_half, 0.1)*100:+.1f}%)")
+
         # Stability check
         if args.monitor and hasattr(agent, 'firing_rate_history'):
             if agent.firing_rate_history:
-                rate_trend = agent.firing_rate_history[-1] - agent.firing_rate_history[0]
+                rate_trend = agent.firing_rate_history[-1] - \
+                    agent.firing_rate_history[0]
                 print(f"\n🔬 Stability Metrics:")
                 print(f"Firing rate drift: {rate_trend:+.2f} Hz")
-                print(f"Final mean rate: {agent.firing_rate_history[-1]:.1f} Hz")
-    
+                print(
+                    f"Final mean rate: {agent.firing_rate_history[-1]:.1f} Hz")
+
     print(f"\n⏱️ Total runtime: {total_time:.1f} seconds")
     print(f"Average per episode: {total_time/args.episodes:.1f} seconds")
-    
+
     # Success indicators
     print("\n✅ Experiment complete!")
     if not args.no_export:
@@ -149,4 +156,3 @@ Phase 0.9 enhances learning speed with gradient-proportional dopamine:
 
 if __name__ == "__main__":
     main()
-

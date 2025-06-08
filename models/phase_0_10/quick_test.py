@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Quick test to verify Phase 0_8 works"""
 
+from models.phase_0_8.agent import SnnAgent
+from models.phase_0_8.config import SnnAgentConfig, WorldConfig, ExperimentConfig, NetworkParams
 import sys
 import os
 sys.path.insert(0, os.path.abspath('../..'))
 
-from models.phase_0_8.config import SnnAgentConfig, WorldConfig, ExperimentConfig, NetworkParams
-from models.phase_0_8.agent import SnnAgent
 
 # Minimal config for quick testing
 config = SnnAgentConfig(

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Test Phase 0.8 with small network for quick verification"""
 
+from models.phase_0_8.agent import SnnAgent
+from models.phase_0_8.config import SnnAgentConfig, WorldConfig, NetworkParams, ExperimentConfig
 import sys
 sys.path.append('../..')
 
-from models.phase_0_8.config import SnnAgentConfig, WorldConfig, NetworkParams, ExperimentConfig
-from models.phase_0_8.agent import SnnAgent
 
 # Small network for testing
 config = SnnAgentConfig(

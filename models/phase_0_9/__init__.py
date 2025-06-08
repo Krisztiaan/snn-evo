@@ -12,4 +12,3 @@ from .agent import SnnAgent
 from .config import SnnAgentConfig, NetworkParams, ExperimentConfig
 
 __all__ = ['SnnAgent', 'SnnAgentConfig', 'NetworkParams', 'ExperimentConfig']
-

@@ -7,7 +7,7 @@ from .world import SimpleGridWorld
 __version__ = "0.1.0"
 __all__ = [
     "SimpleGridWorld",
-    "WorldState", 
+    "WorldState",
     "Observation",
     "StepResult",
     "WorldConfig",

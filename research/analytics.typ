@@ -10,20 +10,20 @@
   // Since Typst doesn't have direct directory listing, we'll try recent timestamps
   let candidates = (
     "run_20250529_195832",
-    "run_20250529_172129", 
+    "run_20250529_172129",
     "run_20250529_164103",
     "run_20250529_160604",
     "run_20250529_151331",
     "run_20250529_151231",
   )
-  
+
   for candidate in candidates {
     let test-path = LOG_BASE + "/" + candidate + "/metadata.json"
     if read(test-path, default: none) != none {
       return LOG_BASE + "/" + candidate
     }
   }
-  
+
   // Default fallback
   return LOG_BASE + "/run_20250529_195832"
 }
@@ -88,13 +88,13 @@ This document presents analysis of the Phase 0.3 experiment for emergent spiking
 #let read-csv(path) = {
   let content = safe-read(path)
   if content == none { return (headers: (), data: ()) }
-  
+
   let lines = content.split("\n").filter(x => x != "")
   if lines.len() == 0 { return (headers: (), data: ()) }
-  
+
   // Check if first line has headers
   let has-headers = lines.at(0).contains("seed") or lines.at(0).contains("episode") or lines.at(0).contains("key")
-  
+
   if has-headers {
     let headers = lines.at(0).split(",")
     let data = lines.slice(1).map(line => line.split(","))
@@ -107,7 +107,7 @@ This document presents analysis of the Phase 0.3 experiment for emergent spiking
 
 // Helper to safely parse numbers
 #let parse-num(s) = {
-  if s == none or s == "nan" or s == "" { 0.0 } 
+  if s == none or s == "nan" or s == "" { 0.0 }
   else { float(str(s).replace("\r", "").trim()) }
 }
 
@@ -124,21 +124,21 @@ This document presents analysis of the Phase 0.3 experiment for emergent spiking
       inset: 10pt,
       align: (left, left),
       [*Category*], [*Configuration*],
-      
+
       [*Network Architecture*], [
         • #metadata.network_architecture.n_neurons neurons (#metadata.network_architecture.grid_size × #metadata.network_architecture.grid_size grid) \
         • Local connectivity radius: #metadata.network_architecture.local_radius \
         • Long-range probability: #metadata.network_architecture.long_range_prob \
         • Inputs: #metadata.network_architecture.n_sensory sensory, Outputs: #metadata.network_architecture.n_motor motor
       ],
-      
+
       [*Neuron Dynamics*], [
         • Leaky Integrate-and-Fire model \
         • Time step: #metadata.neuron_dynamics.dt ms, Membrane τ: #metadata.neuron_dynamics.tau ms \
         • Threshold: #metadata.neuron_dynamics.v_thresh mV (rest: #metadata.neuron_dynamics.v_rest mV) \
         • Refractory period: #metadata.neuron_dynamics.refrac_time ms
       ],
-      
+
       [*Learning*], [
         • Three-factor rule: STDP × Reward × Activity \
         • Base rate: #metadata.learning_parameters.learning_rate \
@@ -146,14 +146,14 @@ This document presents analysis of the Phase 0.3 experiment for emergent spiking
         • STDP: +#metadata.learning_parameters.potentiation_factor/-#metadata.learning_parameters.depression_factor \
         • Eligibility decay: #metadata.learning_parameters.eligibility_decay
       ],
-      
+
       [*Environment*], [
         • #metadata.environment.grid_world_size × #metadata.environment.grid_world_size #metadata.environment.boundary_mode grid \
         • Gradient: #metadata.environment.gradient_function \
         • Reward distance: ≥#metadata.environment.min_reward_distance cells \
         • Collection radius: #metadata.environment.reward_collection_distance
       ],
-      
+
       [*Episode Control*], [
         • Max steps: #metadata.episode_control.max_episode_steps \
         • Early exit: #metadata.episode_control.early_exit_rewards rewards \
@@ -228,18 +228,18 @@ This document presents analysis of the Phase 0.3 experiment for emergent spiking
 #if rewards-content != none {
   let rewards-lines = rewards-content.split("\n").filter(x => x != "")
   let all-rewards = ()
-  
+
   for line in rewards-lines {
     let values = line.split(",").map(s => parse-num(s))
     if values.len() > 0 {
       all-rewards.push(values)
     }
   }
-  
+
   if all-rewards.len() > 0 {
     let n-seeds = all-rewards.len()
     let n-episodes = all-rewards.at(0).len()
-    
+
     // Calculate mean rewards per episode
     let mean-rewards = ()
     for ep in range(n-episodes) {
@@ -253,7 +253,7 @@ This document presents analysis of the Phase 0.3 experiment for emergent spiking
         mean-rewards.push(ep-rewards.sum() / ep-rewards.len())
       }
     }
-    
+
     #figure(
       canvas({
         import draw: *
@@ -289,7 +289,7 @@ This document presents analysis of the Phase 0.3 experiment for emergent spiking
 #if seed-results.data.len() > 0 {
   let seed-indices = seed-results.data.map(row => parse-num(row.at(0)))
   let final-perfs = seed-results.data.map(row => parse-num(row.at(2)))
-  
+
   #figure(
     table(
       columns: if N_SEEDS > 5 { (1fr, 1fr, 1fr) } else { (1fr, 1fr) },
@@ -320,27 +320,27 @@ This document presents analysis of the Phase 0.3 experiment for emergent spiking
       }
     }
   }
-  
+
   if weight-values.len() > 0 {
     // Basic statistics
     let non-zero = weight-values.filter(w => calc.abs(w) > 0.1).len()
     let sparsity = (weight-values.len() - non-zero) / weight-values.len() * 100
-    
+
     [Network has #weight-values.len() synaptic connections with #calc.round(sparsity, digits: 1)% sparsity (|w| < 0.1).]
-    
+
     // Simple histogram
     let n-bins = 20
     let min-w = calc.min(..weight-values)
     let max-w = calc.max(..weight-values)
     let range-w = max-w - min-w
-    
+
     #figure(
       canvas({
         import draw: *
         let bin-width = if range-w > 0 { range-w / n-bins } else { 1 }
         let bins = range(n-bins).map(i => min-w + i * bin-width + bin-width / 2)
         let counts = bins.map(b => weight-values.filter(w => w >= b - bin-width / 2 and w < b + bin-width / 2).len())
-        
+
         chart.columnchart(
           size: (12, 6),
           x-label: "Weight Value",
@@ -364,7 +364,7 @@ This document presents analysis of the Phase 0.3 experiment for emergent spiking
 #let hub-neurons = read-csv("common_hub_neurons.csv")
 #if N_SEEDS > 1 and hub-neurons.data.len() > 0 {
   [The following neurons were identified as hubs across multiple seeds:]
-  
+
   #figure(
     table(
       columns: (1fr, 2fr),
@@ -391,7 +391,7 @@ This document presents analysis of the Phase 0.3 experiment for emergent spiking
 #if best-metrics.data.len() > 0 {
   let episodes = best-metrics.data.map(row => parse-num(row.at(0)))
   let rewards = best-metrics.data.map(row => parse-num(row.at(1)))
-  
+
   #figure(
     canvas({
       import draw: *
@@ -424,7 +424,7 @@ This document presents analysis of the Phase 0.3 experiment for emergent spiking
 #if best-path.data.len() > 0 {
   let path-x = best-path.data.map(row => parse-num(row.at(0)))
   let path-y = best-path.data.map(row => parse-num(row.at(1)))
-  
+
   #figure(
     rect(width: 100%, fill: gray.lighten(95%), stroke: gray)[
       #align(center)[
@@ -437,7 +437,7 @@ This document presents analysis of the Phase 0.3 experiment for emergent spiking
     ],
     caption: [Agent trajectory data (total steps: #path-x.len())],
   )
-  
+
   // Basic path statistics
   let unique-positions = ()
   for i in range(path-x.len()) {
@@ -446,7 +446,7 @@ This document presents analysis of the Phase 0.3 experiment for emergent spiking
       unique-positions.push(pos)
     }
   }
-  
+
   [The agent visited #unique-positions.len() unique positions out of #(GRID_SIZE * GRID_SIZE) total grid cells (#calc.round(unique-positions.len() / (GRID_SIZE * GRID_SIZE) * 100, digits: 1)% coverage).]
 }
 
@@ -458,11 +458,11 @@ This document presents analysis of the Phase 0.3 experiment for emergent spiking
   let gradient-high = specialization.data.map(row => parse-num(row.at(1)))
   let gradient-low = specialization.data.map(row => parse-num(row.at(2)))
   let post-reward = specialization.data.map(row => parse-num(row.at(3)))
-  
+
   // Calculate simple specialization scores
   let gradient-specialists = ()
   let reward-specialists = ()
-  
+
   for i in range(calc.min(gradient-high.len(), N_NEURONS)) {
     let high = gradient-high.at(i)
     let low = gradient-low.at(i)
@@ -473,9 +473,9 @@ This document presents analysis of the Phase 0.3 experiment for emergent spiking
       reward-specialists.push(i)
     }
   }
-  
+
   [Found #gradient-specialists.len() gradient-selective neurons and #reward-specialists.len() reward-responsive neurons.]
-  
+
   #if gradient-specialists.len() > 0 or reward-specialists.len() > 0 {
     figure(
       table(
@@ -498,24 +498,24 @@ This document presents analysis of the Phase 0.3 experiment for emergent spiking
 
 #if N_SEEDS == 1 {
   [This single-seed experiment demonstrates that the emergent spiking neural network can successfully learn to navigate and collect rewards in the grid world environment.]
-  
+
   #if summary-dict.at("final_perf_mean", default: none) != none {
     [- Final performance: #summary-dict.at("final_perf_mean") rewards]
   }
-  
+
   [- Network exhibits sparse connectivity and specialized neurons]
   [- Further experiments with multiple seeds recommended for statistical validation]
 } else {
   [Based on #N_SEEDS independent experimental runs, the emergent spiking neural network demonstrates:]
-  
+
   #if summary-dict.at("final_perf_mean", default: none) != none {
     [- Consistent learning with mean performance of #summary-dict.at("final_perf_mean") ± #summary-dict.at("final_perf_std", default: "0") rewards]
   }
-  
+
   #if summary-dict.at("convergence_proportion", default: none) != none {
     [- #calc.round(parse-num(summary-dict.at("convergence_proportion", default: "0")) * 100, digits: 1)% convergence rate]
   }
-  
+
   [- Emergence of specialized neural structures through reward-modulated plasticity]
   [- Robust learning across different random initializations]
 }

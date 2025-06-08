@@ -14,7 +14,7 @@ from ..simple_grid_0001.types import WorldConfig, WorldState, Observation, StepR
 __version__ = "0.3.0"
 __all__ = [
     "SimpleGridWorld",
-    "WorldState", 
+    "WorldState",
     "Observation",
     "StepResult",
     "WorldConfig",

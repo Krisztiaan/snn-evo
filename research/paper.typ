@@ -8,11 +8,11 @@
   title: "Az epizodikus memória szerepének modellezése a rugalmas és folytonos tanulásban",
   abstract: [
     *Háttér és célkitűzés:* A biológiai rendszerek folytonos tanulási képessége alapvetően különbözik a jelenlegi mesterséges neurális hálózatok megközelítésétől. Jelen kutatás célja biológiailag inspirált, tüzelő neurális hálózatok (Spiking Neural Networks, SNN) evolúciós tervezésének elméleti és gyakorlati vizsgálata, különös tekintettel a folytonos tanulásra és az epizodikus memória szerepére.
-    
+
     *Módszertan:* A hagyományos, előre tervezett modellek helyett evolúciós megközelítést alkalmazunk, amely neurobiológiai elveket – háromtényezős tanulási szabályok, viselkedési időskálájú szinaptikus plaszticitás (Behavioral Timescale Synaptic Plasticity, BTSP), és gátló plaszticitás – integrálva fejleszt adaptív neurális architektúrákat. Elméleti keretrendszerünk bevezeti a "genomikus szűk keresztmetszet" hipotézist, mely szerint az evolúció által preferált általános tanulási elvek csökkenthetik a keresési tér komplexitását.
-    
+
     *Eredmények:* A JAX keretrendszerben implementált 0.1 prototípus demonstrálta az emergens viselkedés kialakulását egyszerű lokális szabályokból. Az ágens sikeresen tanult gradienskövetést 256 neuronnal, 87.65%-os súlyritkaság mellett, átlagosan 25.5 jutalmat gyűjtve epizódonként.
-    
+
     *Következtetések:* A prototípus eredményei alátámasztják, hogy biológiailag inspirált elvek alkalmazása SNN-ekben előnyös lehet. A tervezett teljes rendszer Brian2 keretrendszerben, többfázisú környezeti progresszión keresztül optimalizálja az SNN topográfiákat, célja olyan AI rendszerek fejlesztése, amelyek többszintű adaptációval és katasztrofális felejtés nélküli folyamatos tanulással közelítik az emberi tanulás rugalmasságát.
   ],
   author: (
@@ -173,7 +173,7 @@ A projekt során többszintű neuron modelleket javasolunk implementálni, amely
 1. *Adaptív LIF (Leaky Integrate-and-Fire) neuronok*: Az alapvető Leaky Integrate-and-Fire modellt kiegészítettük adaptációs árammal, amely megragadja a spike-frekvencia adaptációt:
   $ tau_m dot(v) = -(v - E_L) - g_a (v - E_K) + I $ <eq:lif-membrane>
   $ tau_a dot(g_a) = -g_a + b sum_k delta(t - t_k) $ <eq:lif-adaptation>
-  
+
   _Magyarázat: A @eq:lif-membrane egyenlet a neuron membránpotenciáljának ($v$) időbeli változását írja le. A $tau_m$ membrán időállandó határozza meg a változás sebességét. A $(v - E_L)$ tag a nyugalmi potenciál felé húzza a membránpotenciált, a $g_a (v - E_K)$ adaptációs áram csökkenti a gerjeszthetőséget, míg az $I$ a bejövő áram. A @eq:lif-adaptation egyenlet az adaptációs konduktancia ($g_a$) dinamikáját írja le: exponenciálisan csökken ($-g_a$), de minden tüzeléskor ($delta(t - t_k)$) megnő $b$ értékkel, így megvalósítva a tüzelési ráta adaptációt._
 
 2. *Multi-kompartmentális modellek*: A dendritikus számítás megragadásához többrekeszes modelleket tervezhetünk, ahol különböző dendritikus ágak eltérő időskálákon működnek, lehetővé téve a többléptékű temporális feldolgozást.
@@ -244,15 +244,61 @@ A kutatás egyik fontos eleme a genomikus szűk keresztmetszetek automatikus azo
     node-stroke: 1pt,
     edge-stroke: 1pt,
     // Linear evolution phases
-    node((0, 0), [Fázis 1:#linebreak()Gradiens követés], shape: rect, corner-radius: 0.3em, fill: rgb("#e8f4f8"), width: 3cm),
-    node((5, 0), [Fázis 2:#linebreak()Akadály kerülés], shape: rect, corner-radius: 0.3em, fill: rgb("#d4e9f7"), width: 3cm),
-    node((10, 0), [Fázis 3:#linebreak()Többcélú optim.], shape: rect, corner-radius: 0.3em, fill: rgb("#b8dff5"), width: 3cm),
-    node((15, 0), [Fázis N:#linebreak()Komplex probléma], shape: rect, corner-radius: 0.3em, fill: rgb("#9bd3f3"), width: 3cm),
+    node(
+      (0, 0),
+      [Fázis 1:#linebreak()Gradiens követés],
+      shape: rect,
+      corner-radius: 0.3em,
+      fill: rgb("#e8f4f8"),
+      width: 3cm,
+    ),
+    node(
+      (5, 0),
+      [Fázis 2:#linebreak()Akadály kerülés],
+      shape: rect,
+      corner-radius: 0.3em,
+      fill: rgb("#d4e9f7"),
+      width: 3cm,
+    ),
+    node(
+      (10, 0),
+      [Fázis 3:#linebreak()Többcélú optim.],
+      shape: rect,
+      corner-radius: 0.3em,
+      fill: rgb("#b8dff5"),
+      width: 3cm,
+    ),
+    node(
+      (15, 0),
+      [Fázis N:#linebreak()Komplex probléma],
+      shape: rect,
+      corner-radius: 0.3em,
+      fill: rgb("#9bd3f3"),
+      width: 3cm,
+    ),
 
     // Genomic bottlenecks between phases
-    node((2.5, -2), [Genomikus#linebreak()szűk keresztmetszet#linebreak()BN1], shape: ellipse, fill: rgb("#ffe4b5"), width: 2.5cm),
-    node((7.5, -2), [Genomikus#linebreak()szűk keresztmetszet#linebreak()BN2], shape: ellipse, fill: rgb("#ffd4a1"), width: 2.5cm),
-    node((12.5, -2), [Genomikus#linebreak()szűk keresztmetszet#linebreak()BN3], shape: ellipse, fill: rgb("#ffc48d"), width: 2.5cm),
+    node(
+      (2.5, -2),
+      [Genomikus#linebreak()szűk keresztmetszet#linebreak()BN1],
+      shape: ellipse,
+      fill: rgb("#ffe4b5"),
+      width: 2.5cm,
+    ),
+    node(
+      (7.5, -2),
+      [Genomikus#linebreak()szűk keresztmetszet#linebreak()BN2],
+      shape: ellipse,
+      fill: rgb("#ffd4a1"),
+      width: 2.5cm,
+    ),
+    node(
+      (12.5, -2),
+      [Genomikus#linebreak()szűk keresztmetszet#linebreak()BN3],
+      shape: ellipse,
+      fill: rgb("#ffc48d"),
+      width: 2.5cm,
+    ),
 
     // Evolution arrows through phases
     edge((0, 0), (5, 0), "->", [Evolúció], label-pos: 0.5),
@@ -272,7 +318,13 @@ A kutatás egyik fontos eleme a genomikus szűk keresztmetszetek automatikus azo
     edge((7.5, -2), (12.5, -2), "->", [Transzfer tanulás], stroke: rgb("#ff6b6b") + 2pt, label-pos: 0.5),
 
     // Information reduction annotation
-    node((7.5, -4), [Információ redukció:#linebreak()10#super[14] bit → 10#super[8] bit], shape: rect, fill: rgb("#f0f0f0"), stroke: 0.5pt),
+    node(
+      (7.5, -4),
+      [Információ redukció:#linebreak()10#super[14] bit → 10#super[8] bit],
+      shape: rect,
+      fill: rgb("#f0f0f0"),
+      stroke: 0.5pt,
+    ),
   ),
   caption: [Genomikus szűk keresztmetszetek evolúciója többfázisú környezetben. Az evolúció során a neurális architektúrák áthaladnak genomikus szűk keresztmetszeteken, amelyek információ redukcióval segítik az általános tanulási elvek kialakulását.],
 )

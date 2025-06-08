@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -12,13 +13,13 @@
             font-family: Arial, sans-serif;
             background-color: #1a1a1a;
         }
-        
+
         #container {
             width: 100vw;
             height: 100vh;
             position: relative;
         }
-        
+
         #info {
             position: absolute;
             top: 10px;
@@ -31,7 +32,7 @@
             font-size: 14px;
             max-width: 300px;
         }
-        
+
         #controls {
             position: absolute;
             top: 10px;
@@ -46,43 +47,45 @@
             max-height: 90vh;
             overflow-y: auto;
         }
-        
+
         #controls button {
             display: block;
             margin: 5px 0;
             padding: 8px 15px;
-            background: #FF6B00;  /* Aperture orange */
+            background: #FF6B00;
+            /* Aperture orange */
             color: white;
             border: none;
             border-radius: 3px;
             cursor: pointer;
             width: 100%;
         }
-        
+
         #controls button:hover {
-            background: #E85A00;  /* Darker orange */
+            background: #E85A00;
+            /* Darker orange */
         }
-        
+
         #controls button:disabled {
             background: #666;
             cursor: not-allowed;
         }
-        
+
         #controls input[type="range"] {
             width: 100%;
             margin: 10px 0;
         }
-        
+
         .label {
             font-size: 12px;
             color: #aaa;
         }
-        
+
         h3 {
             margin-top: 0;
             color: #FF6B00;
         }
-        
+
         #loadingOverlay {
             position: absolute;
             top: 0;
@@ -97,28 +100,28 @@
             font-size: 20px;
             z-index: 1000;
         }
-        
+
         .play-controls {
             display: flex;
             gap: 10px;
             margin: 10px 0;
         }
-        
+
         .play-controls button {
             flex: 1;
             margin: 0 !important;
         }
-        
+
         #timelineContainer {
             margin: 15px 0;
         }
-        
+
         #stepDisplay {
             text-align: center;
             margin: 5px 0;
             font-weight: bold;
         }
-        
+
         .gradient-bar {
             height: 20px;
             background: linear-gradient(to right, #000 0%, #0f0 100%);
@@ -126,7 +129,7 @@
             margin: 5px 0;
             position: relative;
         }
-        
+
         .gradient-value {
             position: absolute;
             top: 0;
@@ -136,7 +139,7 @@
             background: white;
             transition: left 0.3s ease;
         }
-        
+
         .experiment-item {
             background: #333;
             border: 1px solid #555;
@@ -146,39 +149,40 @@
             cursor: pointer;
             transition: background 0.2s;
         }
-        
+
         .experiment-item:hover {
             background: #444;
         }
-        
+
         .experiment-item.selected {
-            background: #E85A00;  /* Darker orange */
+            background: #E85A00;
+            /* Darker orange */
             border-color: #2196F3;
         }
-        
+
         .experiment-label {
             font-weight: bold;
             margin-bottom: 5px;
         }
-        
+
         .experiment-details {
             font-size: 11px;
             color: #ccc;
         }
-        
+
         #experimentList {
             max-height: 300px;
             overflow-y: auto;
             margin: 10px 0;
         }
-        
+
         .episode-selector {
             display: flex;
             align-items: center;
             gap: 10px;
             margin: 10px 0;
         }
-        
+
         .episode-selector select {
             flex: 1;
             padding: 5px;
@@ -186,7 +190,7 @@
             color: white;
             border: 1px solid #555;
         }
-        
+
         #analytics {
             position: absolute;
             bottom: 10px;
@@ -200,13 +204,13 @@
             display: none;
             overflow: hidden;
         }
-        
+
         .analytics-tabs {
             display: flex;
             gap: 10px;
             margin-bottom: 10px;
         }
-        
+
         .analytics-tab {
             padding: 5px 15px;
             background: #333;
@@ -216,16 +220,17 @@
             cursor: pointer;
             font-size: 12px;
         }
-        
+
         .analytics-tab.active {
-            background: #FF6B00;  /* Aperture orange */
+            background: #FF6B00;
+            /* Aperture orange */
         }
-        
+
         .analytics-content {
             height: calc(100% - 40px);
             position: relative;
         }
-        
+
         .chart-container {
             position: absolute;
             top: 0;
@@ -234,17 +239,18 @@
             bottom: 0;
             display: none;
         }
-        
+
         .chart-container.active {
             display: block;
         }
-        
+
         #toggleAnalytics {
             position: absolute;
             bottom: 10px;
             left: 10px;
             padding: 5px 10px;
-            background: #FF6B00;  /* Aperture orange */
+            background: #FF6B00;
+            /* Aperture orange */
             color: white;
             border: none;
             border-radius: 3px;
@@ -254,11 +260,12 @@
         }
     </style>
 </head>
+
 <body>
     <div id="container"></div>
-    
+
     <div id="loadingOverlay">Loading experiments...</div>
-    
+
     <div id="info">
         <h3>Grid World Trajectory</h3>
         <div><span class="label">Grid Size:</span> <span id="gridSize">-</span></div>
@@ -281,9 +288,9 @@
         <br>
         <div class="label">Controls: Left click + drag to rotate, right click + drag to pan, scroll to zoom</div>
     </div>
-    
+
     <button id="toggleAnalytics" onclick="toggleAnalytics()">📊 Toggle Analytics</button>
-    
+
     <div id="analytics">
         <div class="analytics-tabs">
             <button class="analytics-tab active" onclick="switchAnalyticsTab('rewards')">Reward Stats</button>
@@ -302,54 +309,55 @@
             </div>
         </div>
     </div>
-    
+
     <div id="controls">
         <h3>Experiment Selection</h3>
         <button onclick="refreshExperiments()">🔄 Refresh Experiments</button>
-        
+
         <div style="margin: 10px 0;">
             <label class="label">Model Type:</label>
-            <select id="modelSelect" onchange="selectModel()" style="width: 100%; padding: 5px; background: #333; color: white; border: 1px solid #555;">
+            <select id="modelSelect" onchange="selectModel()"
+                style="width: 100%; padding: 5px; background: #333; color: white; border: 1px solid #555;">
                 <option value="">Select a model...</option>
             </select>
         </div>
-        
+
         <div id="runSelection" style="display: none;">
             <label class="label">Run:</label>
             <div id="experimentList">
                 <div style="text-align: center; color: #666;">Select a model first</div>
             </div>
-            
+
             <div class="episode-selector" id="episodeSelector" style="display: none;">
                 <label class="label">Episode:</label>
                 <select id="episodeSelect"></select>
                 <button onclick="loadSelectedEpisode()">Load</button>
             </div>
         </div>
-        
+
         <hr style="border-color: #444; margin: 15px 0;">
-        
+
         <h3>Playback Controls</h3>
         <div id="stepDisplay">Step: 0 / 0</div>
         <input type="range" id="timeline" min="0" max="0" value="0" step="1">
-        
+
         <div class="play-controls">
             <button id="playBtn" onclick="togglePlay()">▶ Play</button>
             <button onclick="resetTrajectory()">⟲ Reset</button>
         </div>
-        
+
         <label class="label">Playback Speed:</label>
         <input type="range" id="playSpeed" min="0.1" max="5" step="0.1" value="1">
         <div id="speedDisplay" style="text-align: center;">1.0x</div>
-        
+
         <hr style="border-color: #444; margin: 15px 0;">
-        
+
         <h3>Visual Options</h3>
         <button onclick="toggleTrail()">Toggle Trail</button>
         <button onclick="toggleGridLines()">Toggle Grid Lines</button>
         <button onclick="toggleRewardGlow()">Toggle Reward Glow</button>
         <button onclick="resetCamera()">Reset Camera</button>
-        
+
         <br>
         <label class="label">
             <input type="checkbox" id="followCamera" onchange="toggleFollowCamera()"> Follow Camera
@@ -357,7 +365,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-    
+
     <script type="importmap">
         {
             "imports": {
@@ -366,11 +374,11 @@
             }
         }
     </script>
-    
+
     <script type="module">
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-        
+
         // Global variables
         let scene, camera, renderer, controls;
         let gridWorld, agent, rewards = [];
@@ -391,7 +399,7 @@
         let followCamera = false;
         let cameraTargetPosition = new THREE.Vector3();
         let cameraOffset = new THREE.Vector3(0, 15, 20); // Side view offset
-        
+
         // Analytics variables
         let rewardsChart = null;
         let timingChart = null;
@@ -404,7 +412,7 @@
             gradientValues: [],
             neuralActivity: []
         };
-        
+
         // Configuration
         let CONFIG = {
             gridSize: 10,
@@ -423,76 +431,76 @@
             trailColor: 0xFF6B00,   // Orange trail
             trailOpacity: 0.6
         };
-        
+
         // Initialize the scene
         function init() {
             const container = document.getElementById('container');
-            
+
             // Scene
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x000000);  // Black background
-            
+
             // Camera
             const aspect = window.innerWidth / window.innerHeight;
             camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 500);
             camera.position.set(5, 15, 25); // Side view
             camera.lookAt(5, 0, 5);
-            
+
             // Renderer
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.shadowMap.enabled = true;
             renderer.shadowMap.type = THREE.PCFSoftShadowMap;
             container.appendChild(renderer.domElement);
-            
+
             // Controls
             controls = new OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true;
             controls.dampingFactor = 0.05;
             controls.target.set(5, 0, 5);
             controls.update();
-            
+
             // Lights
             setupLights();
-            
+
             // Window resize handler
             window.addEventListener('resize', onWindowResize);
-            
+
             // Timeline handler
             const timeline = document.getElementById('timeline');
             timeline.addEventListener('input', (e) => {
                 currentStep = parseInt(e.target.value);
                 updateVisualization();
             });
-            
+
             // Speed control
             const speedSlider = document.getElementById('playSpeed');
             speedSlider.addEventListener('input', (e) => {
                 document.getElementById('speedDisplay').textContent = e.target.value + 'x';
                 updatePlaybackSpeed();
             });
-            
+
             // Start animation loop
             animate();
-            
+
             // Load experiments
             refreshExperiments();
         }
-        
+
         async function refreshExperiments() {
             const modelSelect = document.getElementById('modelSelect');
             modelSelect.innerHTML = '<option value="">Loading models...</option>';
             document.getElementById('runSelection').style.display = 'none';
             document.getElementById('loadingOverlay').style.display = 'flex';
             document.getElementById('loadingOverlay').textContent = 'Loading experiments...';
-            
+
             try {
                 const response = await fetch('/api/experiments');
                 const data = await response.json();
                 experimentsByModel = data.models;
-                
+
                 document.getElementById('loadingOverlay').style.display = 'none';
-                
+
                 modelSelect.innerHTML = '<option value="">Select a model...</option>';
                 Object.keys(experimentsByModel).sort().forEach(modelName => {
                     const option = document.createElement('option');
@@ -500,7 +508,7 @@
                     option.textContent = `${modelName} (${experimentsByModel[modelName].length} runs)`;
                     modelSelect.appendChild(option);
                 });
-                
+
                 if (data.model_count === 0) {
                     modelSelect.innerHTML = '<option value="">No models found</option>';
                 } else {
@@ -513,18 +521,18 @@
                 document.getElementById('loadingOverlay').style.display = 'none';
             }
         }
-        
+
         async function autoLoadLatestRun(models) {
             // Find the latest model (highest phase number)
             const modelNames = Object.keys(models).sort();
             const latestModel = modelNames[modelNames.length - 1];
-            
+
             if (!latestModel) return;
-            
+
             // Set the model selector
             document.getElementById('modelSelect').value = latestModel;
             selectModel();
-            
+
             // Wait a bit for the experiment list to populate
             setTimeout(() => {
                 // Find the latest run (assuming they're sorted by timestamp)
@@ -532,16 +540,16 @@
                 if (experiments && experiments.length > 0) {
                     // Get the latest experiment (last in the list)
                     const latestExp = experiments[experiments.length - 1];
-                    
+
                     // Select and load it
                     selectedExperiment = latestExp;
-                    
+
                     // Find and click the experiment div
                     const expDivs = document.querySelectorAll('#experimentList > div');
                     if (expDivs.length > 0) {
                         const lastExpDiv = expDivs[expDivs.length - 1];
                         lastExpDiv.click(); // This will trigger selectExperiment
-                        
+
                         // Load the first episode after a short delay
                         setTimeout(() => {
                             if (document.getElementById('episodeSelect').options.length > 1) {
@@ -553,43 +561,43 @@
                 }
             }, 100);
         }
-        
-        window.selectModel = function() {
+
+        window.selectModel = function () {
             const modelName = document.getElementById('modelSelect').value;
-            
+
             if (!modelName) {
                 document.getElementById('runSelection').style.display = 'none';
                 return;
             }
-            
+
             document.getElementById('runSelection').style.display = 'block';
             displayExperiments(modelName);
         };
-        
+
         function displayExperiments(modelName) {
             const listDiv = document.getElementById('experimentList');
             listDiv.innerHTML = '';
-            
+
             const modelExperiments = experimentsByModel[modelName] || [];
-            
+
             if (modelExperiments.length === 0) {
                 listDiv.innerHTML = '<div style="text-align: center; color: #666;">No runs found</div>';
                 return;
             }
-            
+
             modelExperiments.forEach((exp, index) => {
                 const item = document.createElement('div');
                 item.className = 'experiment-item';
                 item.dataset.model = modelName;
                 item.dataset.index = index;
-                
+
                 const label = document.createElement('div');
                 label.className = 'experiment-label';
                 label.textContent = exp.label;
-                
+
                 const details = document.createElement('div');
                 details.className = 'experiment-details';
-                
+
                 const episodes = exp.episodes.length;
                 const timestamp = new Date(exp.timestamp * 1000).toLocaleString();
                 details.innerHTML = `
@@ -597,28 +605,28 @@
                     Path: ${exp.directory}<br>
                     Time: ${timestamp}
                 `;
-                
+
                 item.appendChild(label);
                 item.appendChild(details);
-                
+
                 item.onclick = () => selectExperiment(modelName, index);
-                
+
                 listDiv.appendChild(item);
             });
         }
-        
+
         function selectExperiment(modelName, index) {
             selectedExperiment = experimentsByModel[modelName][index];
-            
+
             document.querySelectorAll('.experiment-item').forEach(item => item.classList.remove('selected'));
             document.querySelector(`[data-model="${modelName}"][data-index="${index}"]`).classList.add('selected');
-            
+
             const episodeSelector = document.getElementById('episodeSelector');
             const episodeSelect = document.getElementById('episodeSelect');
-            
+
             episodeSelector.style.display = 'flex';
             episodeSelect.innerHTML = '';
-            
+
             selectedExperiment.episodes.forEach(ep => {
                 const option = document.createElement('option');
                 option.value = ep;
@@ -626,19 +634,19 @@
                 episodeSelect.appendChild(option);
             });
         }
-        
-        window.loadSelectedEpisode = async function() {
+
+        window.loadSelectedEpisode = async function () {
             if (!selectedExperiment) return;
-            
+
             const episodeId = parseInt(document.getElementById('episodeSelect').value);
-            
+
             document.getElementById('loadingOverlay').style.display = 'flex';
             document.getElementById('loadingOverlay').textContent = 'Loading episode data...';
-            
+
             try {
                 const response = await fetch(`/api/trajectory?path=${encodeURIComponent(selectedExperiment.path)}&episode=${episodeId}`);
                 trajectoryData = await response.json();
-                
+
                 if (trajectoryData.error) {
                     throw new Error(trajectoryData.message);
                 }
@@ -650,44 +658,44 @@
                 document.getElementById('loadingOverlay').textContent = `Error: ${error.message}`;
             }
         };
-        
+
         function setupLights() {
             // Strong white ambient light
             const ambientLight = new THREE.AmbientLight(0xFFFFFF, 0.8);
             scene.add(ambientLight);
-            
+
             // Very strong overhead directional light
             const directionalLight = new THREE.DirectionalLight(0xFFFFFF, 2.0);
             directionalLight.position.set(0, 30, 0);
             directionalLight.target.position.set(CONFIG.gridSize / 2, 0, CONFIG.gridSize / 2);
             scene.add(directionalLight);
             scene.add(directionalLight.target);
-            
+
             // Additional fill light from above
             const fillLight = new THREE.DirectionalLight(0xFFFFFF, 1.0);
             fillLight.position.set(CONFIG.gridSize / 2, 25, CONFIG.gridSize / 2);
             scene.add(fillLight);
-            
+
             // Remove shadows for cleaner look
             renderer.shadowMap.enabled = false;
         }
-        
+
         function createGridWorld(gridSize) {
             // Remove existing world
             if (gridWorld) {
                 scene.remove(gridWorld);
             }
-            
+
             CONFIG.gridSize = gridSize;
             gridWorld = new THREE.Group();
-            
+
             // Floor
             const floorGeometry = new THREE.BoxGeometry(
                 CONFIG.gridSize * CONFIG.cellSize,
                 0.1,
                 CONFIG.gridSize * CONFIG.cellSize
             );
-            const floorMaterial = new THREE.MeshPhongMaterial({ 
+            const floorMaterial = new THREE.MeshPhongMaterial({
                 color: CONFIG.floorColor,
                 specular: 0x404040,  // Much less reflective
                 shininess: 10        // Matte finish
@@ -696,53 +704,53 @@
             floor.position.set(CONFIG.gridSize / 2, -0.05, CONFIG.gridSize / 2);
             floor.receiveShadow = true;
             gridWorld.add(floor);
-            
+
             // Grid lines
             createGridLines();
-            
+
             // Add walls
             createWalls();
-            
+
             scene.add(gridWorld);
-            
+
             // Update camera for grid size
             controls.target.set(CONFIG.gridSize / 2, 0, CONFIG.gridSize / 2);
-            
+
             // Adjust camera distance based on grid size (side view)
             const cameraDistance = CONFIG.gridSize > 20 ? CONFIG.gridSize * 1.5 : CONFIG.gridSize * 2.0;
             const cameraHeight = CONFIG.gridSize > 20 ? CONFIG.gridSize * 0.8 : CONFIG.gridSize * 1.2;
-            
+
             camera.position.set(CONFIG.gridSize / 2, cameraHeight, cameraDistance);
             camera.far = CONFIG.gridSize * 3;
             camera.updateProjectionMatrix();
-            
+
             // Update fog for larger grids
             if (CONFIG.gridSize > 20) {
                 scene.fog = new THREE.Fog(0x202020, CONFIG.gridSize * 0.5, CONFIG.gridSize * 2);
             } else {
                 scene.fog = new THREE.Fog(0x202020, 20, 60);
             }
-            
+
             controls.update();
         }
-        
+
         function createGridLines() {
             gridLines = new THREE.Group();
-            const lineMaterial = new THREE.LineBasicMaterial({ 
+            const lineMaterial = new THREE.LineBasicMaterial({
                 color: CONFIG.gridLineColor,
                 transparent: true,
                 opacity: 0.8,
                 linewidth: 2
             });
-            
+
             // For large grids, reduce line density
             const step = CONFIG.gridSize > 20 ? 5 : 1;
             const lineCount = Math.floor(CONFIG.gridSize / step) + 1;
-            
+
             // Create grid lines with reduced density for large grids
             for (let i = 0; i < lineCount; i++) {
                 const pos = i * step;
-                
+
                 // Horizontal lines
                 const hGeometry = new THREE.BufferGeometry().setFromPoints([
                     new THREE.Vector3(0, 0.01, pos),
@@ -750,7 +758,7 @@
                 ]);
                 const hLine = new THREE.Line(hGeometry, lineMaterial);
                 gridLines.add(hLine);
-                
+
                 // Vertical lines
                 const vGeometry = new THREE.BufferGeometry().setFromPoints([
                     new THREE.Vector3(pos, 0.01, 0),
@@ -759,7 +767,7 @@
                 const vLine = new THREE.Line(vGeometry, lineMaterial);
                 gridLines.add(vLine);
             }
-            
+
             // Add edge lines if needed
             if (CONFIG.gridSize % step !== 0) {
                 // Final horizontal line
@@ -768,7 +776,7 @@
                     new THREE.Vector3(CONFIG.gridSize, 0.01, CONFIG.gridSize)
                 ]);
                 gridLines.add(new THREE.Line(hGeometry, lineMaterial));
-                
+
                 // Final vertical line
                 const vGeometry = new THREE.BufferGeometry().setFromPoints([
                     new THREE.Vector3(CONFIG.gridSize, 0.01, 0),
@@ -776,21 +784,21 @@
                 ]);
                 gridLines.add(new THREE.Line(vGeometry, lineMaterial));
             }
-            
+
             gridWorld.add(gridLines);
         }
-        
+
         function createWalls() {
             // Create platform sides (walls underneath)
-            const platformMaterial = new THREE.MeshPhongMaterial({ 
+            const platformMaterial = new THREE.MeshPhongMaterial({
                 color: 0x808080, // Gray platform sides
                 specular: 0x404040,
                 shininess: 30
             });
-            
+
             const platformDepth = 2; // Depth of platform below floor
             const wallThickness = 0.3;
-            
+
             // North side
             const northSide = new THREE.Mesh(
                 new THREE.BoxGeometry(CONFIG.gridSize * CONFIG.cellSize + wallThickness * 2, platformDepth, wallThickness),
@@ -800,7 +808,7 @@
             northSide.castShadow = true;
             northSide.receiveShadow = true;
             gridWorld.add(northSide);
-            
+
             // South side
             const southSide = new THREE.Mesh(
                 new THREE.BoxGeometry(CONFIG.gridSize * CONFIG.cellSize + wallThickness * 2, platformDepth, wallThickness),
@@ -810,7 +818,7 @@
             southSide.castShadow = true;
             southSide.receiveShadow = true;
             gridWorld.add(southSide);
-            
+
             // East side
             const eastSide = new THREE.Mesh(
                 new THREE.BoxGeometry(wallThickness, platformDepth, CONFIG.gridSize * CONFIG.cellSize + wallThickness * 2),
@@ -820,7 +828,7 @@
             eastSide.castShadow = true;
             eastSide.receiveShadow = true;
             gridWorld.add(eastSide);
-            
+
             // West side
             const westSide = new THREE.Mesh(
                 new THREE.BoxGeometry(wallThickness, platformDepth, CONFIG.gridSize * CONFIG.cellSize + wallThickness * 2),
@@ -830,7 +838,7 @@
             westSide.castShadow = true;
             westSide.receiveShadow = true;
             gridWorld.add(westSide);
-            
+
             // Bottom of platform
             const bottomGeometry = new THREE.BoxGeometry(
                 CONFIG.gridSize * CONFIG.cellSize + wallThickness * 2,
@@ -842,18 +850,18 @@
             bottom.receiveShadow = true;
             gridWorld.add(bottom);
         }
-        
+
         function createAgent(position = [5, 0.3, 5]) {
             if (agent) {
                 scene.remove(agent);
             }
-            
+
             // Create agent group
             agent = new THREE.Group();
-            
+
             // Create rounded box body (bright orange)
             const roundedBoxGeometry = createRoundedBoxGeometry(CONFIG.agentSize, CONFIG.agentSize, CONFIG.agentSize, 0.1, 2);
-            const bodyMaterial = new THREE.MeshPhongMaterial({ 
+            const bodyMaterial = new THREE.MeshPhongMaterial({
                 color: CONFIG.agentCoreColor, // Bright orange
                 emissive: CONFIG.agentCoreColor,
                 emissiveIntensity: 0.2,
@@ -863,7 +871,7 @@
             const body = new THREE.Mesh(roundedBoxGeometry, bodyMaterial);
             body.castShadow = true;
             agent.add(body);
-            
+
             // Add eyes
             const eyeGeometry = new THREE.SphereGeometry(CONFIG.agentSize * 0.08, 8, 8);
             const eyeMaterial = new THREE.MeshPhongMaterial({
@@ -871,17 +879,17 @@
                 specular: 0xFFFFFF,
                 shininess: 100
             });
-            
+
             // Left eye
             const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
             leftEye.position.set(-CONFIG.agentSize * 0.2, CONFIG.agentSize * 0.15, CONFIG.agentSize * 0.51);
             agent.add(leftEye);
-            
+
             // Right eye
             const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
             rightEye.position.set(CONFIG.agentSize * 0.2, CONFIG.agentSize * 0.15, CONFIG.agentSize * 0.51);
             agent.add(rightEye);
-            
+
             // Add bright orange aura
             const auraGeometry = new THREE.SphereGeometry(CONFIG.agentSize * 1.5, 16, 16);
             const auraMaterial = new THREE.MeshBasicMaterial({
@@ -891,7 +899,7 @@
             });
             const aura = new THREE.Mesh(auraGeometry, auraMaterial);
             agent.add(aura);
-            
+
             // Add outer aura for extra glow
             const outerAuraGeometry = new THREE.SphereGeometry(CONFIG.agentSize * 2.0, 8, 8);
             const outerAuraMaterial = new THREE.MeshBasicMaterial({
@@ -901,11 +909,11 @@
             });
             const outerAura = new THREE.Mesh(outerAuraGeometry, outerAuraMaterial);
             agent.add(outerAura);
-            
+
             agent.position.set(...position);
             scene.add(agent);
         }
-        
+
         // Helper function to create rounded box geometry
         function createCollectionAnimation(reward, index) {
             const animation = {
@@ -918,7 +926,7 @@
                 startOpacity: reward.material.opacity,
                 particles: []
             };
-            
+
             // Create particle burst
             for (let i = 0; i < 10; i++) {
                 const particleGeometry = new THREE.SphereGeometry(0.05, 4, 4);
@@ -939,10 +947,10 @@
                 scene.add(particle);
                 animation.particles.push(particle);
             }
-            
+
             collectedRewardAnimations.push(animation);
         }
-        
+
         function createRoundedBoxGeometry(width, height, depth, radius, smoothness) {
             const shape = new THREE.Shape();
             const eps = 0.00001;
@@ -951,7 +959,7 @@
             shape.absarc(radius0, height - radius * 2, radius0, Math.PI, Math.PI / 2, true);
             shape.absarc(width - radius * 2, height - radius * 2, radius0, Math.PI / 2, 0, true);
             shape.absarc(width - radius * 2, radius0, radius0, 0, -Math.PI / 2, true);
-            
+
             const extrudeSettings = {
                 depth: depth - radius * 2,
                 bevelEnabled: true,
@@ -961,27 +969,27 @@
                 bevelThickness: radius,
                 curveSegments: smoothness
             };
-            
+
             const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
             geometry.center();
-            
+
             return geometry;
         }
-        
+
         function createRewards(positions) {
             // Clear existing rewards and glows
             rewards.forEach(reward => scene.remove(reward));
             rewards = [];
             rewardGlows.forEach(glow => scene.remove(glow));
             rewardGlows = [];
-            
+
             // Reduce sphere complexity for large grids
             const segments = CONFIG.gridSize > 20 ? 8 : 16;
-            
+
             // Create new rewards as energy orbs
             positions.forEach((pos, index) => {
                 const geometry = new THREE.SphereGeometry(CONFIG.rewardSize / 2, segments, segments);
-                const material = new THREE.MeshPhongMaterial({ 
+                const material = new THREE.MeshPhongMaterial({
                     color: CONFIG.rewardColor,
                     emissive: CONFIG.rewardColor,
                     emissiveIntensity: 0.5,
@@ -996,7 +1004,7 @@
                 reward.userData = { collected: false, originalY: CONFIG.rewardSize / 2 + 0.3, index: index };
                 rewards.push(reward);
                 scene.add(reward);
-                
+
                 // Add bright blue glow effect
                 const glowGeometry = new THREE.SphereGeometry(CONFIG.rewardSize * 2.0, 16, 16);
                 const glowMaterial = new THREE.MeshBasicMaterial({
@@ -1008,7 +1016,7 @@
                 glow.position.copy(reward.position);
                 rewardGlows.push(glow);
                 scene.add(glow);
-                
+
                 // Add outer glow for extra visibility
                 const outerGlowGeometry = new THREE.SphereGeometry(CONFIG.rewardSize * 3.0, 8, 8);
                 const outerGlowMaterial = new THREE.MeshBasicMaterial({
@@ -1021,12 +1029,12 @@
                 scene.add(outerGlow);
             });
         }
-        
+
         function createTrail() {
             if (trail) {
                 scene.remove(trail);
             }
-            
+
             const geometry = new THREE.BufferGeometry();
             const material = new THREE.LineBasicMaterial({
                 color: CONFIG.trailColor,
@@ -1034,28 +1042,28 @@
                 opacity: CONFIG.trailOpacity,
                 linewidth: 2
             });
-            
+
             trail = new THREE.LineSegments(geometry, material);
             trail.frustumCulled = false; // Prevent trail from disappearing
             scene.add(trail);
         }
-        
+
         function updateTrail() {
             if (!trail || !showTrail || !trajectoryData) return;
-            
+
             const positions = [];
             const indices = [];
             let currentSegmentStart = 0;
-            
+
             for (let i = 0; i <= currentStep && i < trajectoryData.trajectory.length; i++) {
                 const step = trajectoryData.trajectory[i];
-                
+
                 // Check for toroidal wrap
                 if (i > 0) {
                     const prevStep = trajectoryData.trajectory[i - 1];
                     const dx = Math.abs(step.agentPos[0] - prevStep.agentPos[0]);
                     const dy = Math.abs(step.agentPos[1] - prevStep.agentPos[1]);
-                    
+
                     // If movement is more than half the grid size, it's a wrap
                     if (dx > CONFIG.gridSize / 2 || dy > CONFIG.gridSize / 2) {
                         // Create line segment for previous continuous path
@@ -1065,28 +1073,28 @@
                         currentSegmentStart = positions.length / 3;
                     }
                 }
-                
+
                 positions.push(
                     step.agentPos[0] + 0.5,
                     0.1,
                     step.agentPos[1] + 0.5
                 );
             }
-            
+
             // Add final segment
             for (let j = currentSegmentStart; j < positions.length / 3 - 1; j++) {
                 indices.push(j, j + 1);
             }
-            
-            trail.geometry.setAttribute('position', 
+
+            trail.geometry.setAttribute('position',
                 new THREE.Float32BufferAttribute(positions, 3)
             );
             trail.geometry.setIndex(indices);
         }
-        
+
         function setupVisualization() {
             if (!trajectoryData) return;
-            
+
             // Update metadata display
             const meta = trajectoryData.metadata;
             document.getElementById('gridSize').textContent = `${meta.gridSize}x${meta.gridSize}`;
@@ -1094,78 +1102,78 @@
             document.getElementById('totalSteps').textContent = meta.totalSteps;
             document.getElementById('coverage').textContent = meta.coverage ? `${(meta.coverage * 100).toFixed(1)}%` : 'N/A';
             document.getElementById('seed').textContent = meta.seed || 'N/A';
-            
+
             // Show data sampling info if neural data is sampled
             if (meta.hasNeuralData) {
                 const neuralInfoDiv = document.getElementById('neuralDataInfo');
                 const neuralInfoSpan = document.getElementById('neuralSamplingInfo');
                 neuralInfoDiv.style.display = 'block';
-                
+
                 if (meta.neuralSamplingRate > 1) {
                     neuralInfoSpan.textContent = `Every ${meta.neuralSamplingRate} steps (${meta.neuralSamplingRate * meta.simulationDt}ms)`;
                 } else {
                     neuralInfoSpan.textContent = 'Every timestep';
                 }
             }
-            
+
             // Create world
             createGridWorld(meta.gridSize);
-            
+
             // Create rewards
             createRewards(trajectoryData.world.rewardPositions);
-            
+
             // Create agent at initial position
             const initialPos = trajectoryData.trajectory[0].agentPos;
             createAgent([initialPos[0] + 0.5, CONFIG.agentSize / 2, initialPos[1] + 0.5]);
-            
+
             // Initialize agent position tracking
             agentTargetPosition.set(initialPos[0] + 0.5, CONFIG.agentSize / 2, initialPos[1] + 0.5);
             agentPreviousPosition.copy(agentTargetPosition);
             agentTargetRotation = 0;
-            
+
             // Create trail
             createTrail();
-            
+
             // Setup timeline
             const timeline = document.getElementById('timeline');
             timeline.max = meta.totalSteps;
             timeline.value = 0;
             currentStep = 0;
-            
+
             // Process analytics data
             processAnalyticsData();
-            
+
             // Update display
             updateVisualization();
         }
-        
+
         function updateVisualization() {
             if (!trajectoryData || currentStep >= trajectoryData.trajectory.length) return;
-            
+
             const stepData = trajectoryData.trajectory[currentStep];
-            
+
             // Update agent target position for smooth movement
             if (agent) {
                 // Store previous position for direction calculation
                 agentPreviousPosition.copy(agentTargetPosition);
-                
+
                 agentTargetPosition.set(
                     stepData.agentPos[0] + 0.5,
                     agent.position.y,
                     stepData.agentPos[1] + 0.5
                 );
-                
+
                 // Calculate direction based on movement
                 const dx = agentTargetPosition.x - agentPreviousPosition.x;
                 const dz = agentTargetPosition.z - agentPreviousPosition.z;
-                
+
                 // Only update rotation if there's actual movement
                 if (Math.abs(dx) > 0.01 || Math.abs(dz) > 0.01) {
                     // Calculate angle (0 = facing +Z, PI/2 = facing +X, etc.)
                     agentTargetRotation = Math.atan2(dx, dz);
                 }
             }
-            
+
             // Update rewards collected status with animation
             if (stepData.rewardCollected) {
                 stepData.rewardCollected.forEach((collected, index) => {
@@ -1176,104 +1184,104 @@
                     }
                 });
             }
-            
+
             // Update trail
             updateTrail();
-            
+
             // Update info display
-            document.getElementById('agentPos').textContent = 
+            document.getElementById('agentPos').textContent =
                 `(${stepData.agentPos[0]}, ${stepData.agentPos[1]})`;
-            
-            const collected = stepData.rewardCollected ? 
+
+            const collected = stepData.rewardCollected ?
                 stepData.rewardCollected.filter(r => r).length : 0;
-            document.getElementById('rewardsCollected').textContent = 
+            document.getElementById('rewardsCollected').textContent =
                 `${collected}/${trajectoryData.metadata.nRewards}`;
-            
-            document.getElementById('cumulativeReward').textContent = 
+
+            document.getElementById('cumulativeReward').textContent =
                 stepData.cumulativeReward ? stepData.cumulativeReward.toFixed(1) : '0';
-            
+
             // Update gradient display
             const gradient = stepData.observation || 0;
             document.getElementById('gradientValue').textContent = gradient.toFixed(3);
             document.getElementById('gradientIndicator').style.left = (gradient * 100) + '%';
-            
+
             // Update step display
-            document.getElementById('stepDisplay').textContent = 
+            document.getElementById('stepDisplay').textContent =
                 `Step: ${currentStep} / ${trajectoryData.metadata.totalSteps}`;
-                
+
             // Update analytics if visible
             const analyticsPanel = document.getElementById('analytics');
             if (analyticsPanel.style.display === 'block') {
                 updateAnalyticsCharts();
             }
         }
-        
+
         function animate() {
             animationId = requestAnimationFrame(animate);
-            
+
             // Update controls
             controls.update();
-            
+
             // Smooth agent movement
             if (agent && agentTargetPosition) {
                 agent.position.lerp(agentTargetPosition, 0.15);
-                
+
                 // Smooth rotation
                 const currentRotation = agent.rotation.y;
                 const rotationDiff = agentTargetRotation - currentRotation;
-                
+
                 // Handle rotation wrap-around
                 let shortestDiff = rotationDiff;
                 if (Math.abs(rotationDiff) > Math.PI) {
                     shortestDiff = rotationDiff - Math.sign(rotationDiff) * 2 * Math.PI;
                 }
-                
+
                 agent.rotation.y += shortestDiff * 0.2; // Smooth rotation lerp
-                
+
                 // Update agent light position
                 const agentLight = scene.children.find(child => child.isPointLight && child.color.getHex() === CONFIG.agentCoreColor);
                 if (agentLight) {
                     agentLight.position.copy(agent.position);
                     agentLight.position.y += 1;
                 }
-                
+
                 // Keep agent at fixed height (no bobbing)
             }
-            
+
             // Keep rewards at fixed position (no floating animation)
-            
+
             // No agent animations
-            
+
             // Update camera for follow mode
             if (followCamera && agent) {
                 // Set target position with offset
                 cameraTargetPosition.copy(agent.position);
                 cameraTargetPosition.add(cameraOffset);
-                
+
                 // Smooth camera movement
                 camera.position.lerp(cameraTargetPosition, 0.1);
-                
+
                 // Update controls target to look at agent
                 controls.target.lerp(agent.position, 0.1);
                 controls.update();
             }
-            
+
             // Update collection animations
             collectedRewardAnimations = collectedRewardAnimations.filter(anim => {
                 const elapsed = Date.now() - anim.startTime;
                 const progress = Math.min(elapsed / anim.duration, 1);
-                
+
                 if (progress < 1) {
                     // Scale and fade reward
                     const scale = anim.startScale + (anim.endScale - anim.startScale) * progress;
                     anim.reward.scale.setScalar(scale);
                     anim.reward.material.opacity = anim.startOpacity * (1 - progress);
-                    
+
                     if (anim.glow) {
                         anim.glow.scale.setScalar(scale * 1.5);
                         anim.glow.material.opacity = 0.3 * (1 - progress);
                     }
-                    
+
                     // Update particles
                     anim.particles.forEach(particle => {
                         particle.position.add(particle.userData.velocity);
@@ -1281,7 +1289,7 @@
                         particle.material.opacity = 0.8 * (1 - progress);
                         particle.scale.setScalar(1 - progress * 0.5);
                     });
-                    
+
                     return true;
                 } else {
                     // Animation complete - cleanup
@@ -1291,22 +1299,22 @@
                     return false;
                 }
             });
-            
+
             // Render
             renderer.render(scene, camera);
         }
-        
+
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
-        
+
         // Control functions
-        window.togglePlay = function() {
+        window.togglePlay = function () {
             isPlaying = !isPlaying;
             const playBtn = document.getElementById('playBtn');
-            
+
             if (isPlaying) {
                 playBtn.textContent = '⏸ Pause';
                 startPlayback();
@@ -1315,13 +1323,13 @@
                 stopPlayback();
             }
         };
-        
+
         function startPlayback() {
             if (!trajectoryData) return;
-            
+
             const speed = parseFloat(document.getElementById('playSpeed').value);
             const interval = 100 / speed; // Base interval 100ms
-            
+
             playInterval = setInterval(() => {
                 if (currentStep < trajectoryData.metadata.totalSteps) {
                     currentStep++;
@@ -1332,71 +1340,71 @@
                 }
             }, interval);
         }
-        
+
         function stopPlayback() {
             if (playInterval) {
                 clearInterval(playInterval);
                 playInterval = null;
             }
         }
-        
+
         // Update playback speed dynamically
-        window.updatePlaybackSpeed = function() {
+        window.updatePlaybackSpeed = function () {
             if (isPlaying) {
                 stopPlayback();
                 startPlayback();
             }
         };
-        
-        window.resetTrajectory = function() {
+
+        window.resetTrajectory = function () {
             if (isPlaying) togglePlay();
             currentStep = 0;
             document.getElementById('timeline').value = 0;
             updateVisualization();
         };
-        
-        window.toggleTrail = function() {
+
+        window.toggleTrail = function () {
             showTrail = !showTrail;
             if (trail) trail.visible = showTrail;
         };
-        
-        window.toggleGridLines = function() {
+
+        window.toggleGridLines = function () {
             if (gridLines) gridLines.visible = !gridLines.visible;
         };
-        
-        window.toggleRewardGlow = function() {
+
+        window.toggleRewardGlow = function () {
             rewardGlows.forEach(glow => {
                 glow.visible = !glow.visible;
             });
         };
-        
-        window.resetCamera = function() {
+
+        window.resetCamera = function () {
             const cameraDistance = CONFIG.gridSize > 20 ? CONFIG.gridSize * 1.5 : CONFIG.gridSize * 2.0;
             const cameraHeight = CONFIG.gridSize > 20 ? CONFIG.gridSize * 0.8 : CONFIG.gridSize * 1.2;
-            
+
             // Side view position
             camera.position.set(CONFIG.gridSize / 2, cameraHeight, cameraDistance);
             controls.target.set(CONFIG.gridSize / 2, 0, CONFIG.gridSize / 2);
             controls.update();
         };
-        
-        window.toggleFollowCamera = function() {
+
+        window.toggleFollowCamera = function () {
             followCamera = document.getElementById('followCamera').checked;
             if (!followCamera) {
                 // Reset camera when disabling follow mode
                 resetCamera();
             }
         };
-        
+
         window.refreshExperiments = refreshExperiments;
-        
+
         // Analytics functions
         function initializeAnalytics() {
             initializeRewardsChart();
             initializeTimingChart();
             initializeNetworkChart();
         }
-        
+
         function initializeRewardsChart() {
             const ctx = document.getElementById('rewardsCanvas').getContext('2d');
             rewardsChart = new Chart(ctx, {
@@ -1456,7 +1464,7 @@
                 }
             });
         }
-        
+
         function initializeTimingChart() {
             const ctx = document.getElementById('timingCanvas').getContext('2d');
             timingChart = new Chart(ctx, {
@@ -1494,7 +1502,7 @@
                 }
             });
         }
-        
+
         function initializeNetworkChart() {
             const ctx = document.getElementById('networkCanvas').getContext('2d');
             networkChart = new Chart(ctx, {
@@ -1534,7 +1542,7 @@
                         },
                         tooltip: {
                             callbacks: {
-                                label: function(context) {
+                                label: function (context) {
                                     const stepIndex = context.dataIndex;
                                     const step = analyticsData.neuralActivitySteps[stepIndex];
                                     const data = trajectoryData?.trajectory[step];
@@ -1566,9 +1574,9 @@
                     scales: {
                         x: {
                             title: { display: true, text: 'Step', color: 'white' },
-                            ticks: { 
+                            ticks: {
                                 color: 'white',
-                                callback: function(value, index, values) {
+                                callback: function (value, index, values) {
                                     // Show actual timestep value
                                     return this.getLabelForValue(value);
                                 }
@@ -1595,10 +1603,10 @@
                 }
             });
         }
-        
+
         function processAnalyticsData() {
             if (!trajectoryData) return;
-            
+
             analyticsData = {
                 steps: [],
                 cumulativeRewards: [],
@@ -1610,19 +1618,19 @@
                 neuralActivityValues: [],   // Store only the actual neural values
                 meanPotentialValues: []     // Store mean membrane potential values
             };
-            
+
             let lastRewardStep = 0;
             let prevRewardsCollected = 0;
-            
+
             trajectoryData.trajectory.forEach((step, index) => {
                 analyticsData.steps.push(index);
                 analyticsData.cumulativeRewards.push(step.cumulativeReward || 0);
                 analyticsData.gradientValues.push(step.observation || 0);
-                
+
                 // Check for new rewards
-                const currentRewardsCollected = step.rewardCollected ? 
+                const currentRewardsCollected = step.rewardCollected ?
                     step.rewardCollected.filter(r => r).length : 0;
-                
+
                 if (currentRewardsCollected > prevRewardsCollected) {
                     analyticsData.rewardTimestamps.push(index);
                     if (analyticsData.rewardTimestamps.length > 1) {
@@ -1631,7 +1639,7 @@
                     lastRewardStep = index;
                     prevRewardsCollected = currentRewardsCollected;
                 }
-                
+
                 // Extract neural activity data if available
                 if (step.neuralActivity) {
                     // Use actual firing rate in Hz if available
@@ -1657,10 +1665,10 @@
                 }
             });
         }
-        
+
         function updateAnalyticsCharts() {
             if (!analyticsData.steps.length) return;
-            
+
             // Update data up to current step
             const currentData = {
                 steps: analyticsData.steps.slice(0, currentStep + 1),
@@ -1668,7 +1676,7 @@
                 gradientValues: analyticsData.gradientValues.slice(0, currentStep + 1),
                 neuralActivity: analyticsData.neuralActivity.slice(0, currentStep + 1)
             };
-            
+
             // Update rewards chart
             if (rewardsChart) {
                 rewardsChart.data.labels = currentData.steps;
@@ -1676,28 +1684,28 @@
                 rewardsChart.data.datasets[1].data = currentData.gradientValues;
                 rewardsChart.update('none');
             }
-            
+
             // Update timing chart
             if (timingChart && analyticsData.timeBetweenRewards.length > 0) {
                 const rewardsUpToCurrent = analyticsData.rewardTimestamps.filter(t => t <= currentStep);
                 const timingData = analyticsData.timeBetweenRewards.slice(0, rewardsUpToCurrent.length - 1);
-                
+
                 timingChart.data.labels = timingData.map((_, i) => `Reward ${i + 2}`);
                 timingChart.data.datasets[0].data = timingData;
                 timingChart.update('none');
             }
-            
+
             // Update network chart
             if (networkChart) {
                 // Filter to only show timesteps that have neural data
                 const neuralStepsUpToCurrent = analyticsData.neuralActivitySteps.filter(step => step <= currentStep);
-                const neuralValuesUpToCurrent = neuralStepsUpToCurrent.map((step, idx) => 
+                const neuralValuesUpToCurrent = neuralStepsUpToCurrent.map((step, idx) =>
                     analyticsData.neuralActivityValues[idx]
                 );
-                const potentialValuesUpToCurrent = neuralStepsUpToCurrent.map((step, idx) => 
+                const potentialValuesUpToCurrent = neuralStepsUpToCurrent.map((step, idx) =>
                     analyticsData.meanPotentialValues[idx]
                 );
-                
+
                 networkChart.data.labels = neuralStepsUpToCurrent;
                 // Use actual firing rates in Hz (no scaling needed)
                 networkChart.data.datasets[0].data = neuralValuesUpToCurrent;
@@ -1706,11 +1714,11 @@
                 networkChart.update('none');
             }
         }
-        
-        window.toggleAnalytics = function() {
+
+        window.toggleAnalytics = function () {
             const analyticsPanel = document.getElementById('analytics');
             const toggleBtn = document.getElementById('toggleAnalytics');
-            
+
             if (analyticsPanel.style.display === 'none' || !analyticsPanel.style.display) {
                 analyticsPanel.style.display = 'block';
                 toggleBtn.style.bottom = '270px';
@@ -1723,20 +1731,20 @@
                 toggleBtn.style.bottom = '10px';
             }
         };
-        
-        window.switchAnalyticsTab = function(tab) {
+
+        window.switchAnalyticsTab = function (tab) {
             // Update tab buttons
             document.querySelectorAll('.analytics-tab').forEach(btn => {
                 btn.classList.remove('active');
             });
             event.target.classList.add('active');
-            
+
             // Update chart containers
             document.querySelectorAll('.chart-container').forEach(container => {
                 container.classList.remove('active');
             });
-            
-            switch(tab) {
+
+            switch (tab) {
                 case 'rewards':
                     document.getElementById('rewardsChart').classList.add('active');
                     break;
@@ -1748,11 +1756,12 @@
                     break;
             }
         };
-        
+
         window.refreshExperiments = refreshExperiments;
-        
+
         // Initialize on load
         init();
     </script>
 </body>
+
 </html>

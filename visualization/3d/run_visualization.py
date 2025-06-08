@@ -44,8 +44,7 @@ def main():
 
     # Start browser in background
     browser_thread = Thread(
-        target=open_browser,
-        args=("http://localhost:8000/grid_world_trajectory_viewer.html",)
+        target=open_browser, args=("http://localhost:8000/grid_world_trajectory_viewer.html",)
     )
     browser_thread.daemon = True
     browser_thread.start()

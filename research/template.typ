@@ -4,25 +4,19 @@
 #let bsc-thesis(
   // The thesis title
   title: [Thesis Title],
-
   // Author information
   author: (
     name: [Author Name],
-    program: [Program Name BSc]
+    program: [Program Name BSc],
   ),
-
   // Supervisor information
   supervisor: [Supervisor Name],
-
   // Year of submission
   year: [2024],
-
   // Hungarian abstract
   abstract: none,
-
   // Bibliography file
   bibliography: none,
-
   // The thesis content
   body,
 ) = {
@@ -49,7 +43,7 @@
 
   // Set paragraph properties
   set par(
-    leading: 0.65em * 1.5,  // 1.5 line spacing
+    leading: 0.65em * 1.5, // 1.5 line spacing
     justify: true,
   )
 
@@ -81,7 +75,7 @@
             ]
             #it.caption
           ]
-        ]
+        ],
       )
     ]
   }
@@ -96,7 +90,7 @@
       text(size: 14pt)[
         Pázmány Péter Katolikus Egyetem\
         Információs Technológiai és Bionikai Kar
-      ]
+      ],
     )
 
     #v(2cm)
@@ -162,7 +156,7 @@
         return "Függelék " + numbering("A.1", ..nums)
       }
       return numbering("A.1", ..nums)
-    }
+    },
   )
   counter(heading).update(0)
   heading(content)
