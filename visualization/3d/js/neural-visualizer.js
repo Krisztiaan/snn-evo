@@ -81,7 +81,7 @@ export class NeuralVisualizer {
         this.needsRedraw = true;
         
         // Process connectivity data if available
-        if (neuralData.weights) {
+        if (neuralData && neuralData.weights && neuralData.weights.length > 0) {
             this.processConnectivity(neuralData.weights);
         }
         
@@ -90,12 +90,14 @@ export class NeuralVisualizer {
     }
     
     computeSpikeDensity() {
-        if (!this.data || !this.data.spikes) return;
+        if (!this.data || !this.data.spikes || this.data.spikes.length === 0) return;
         
         // Compute spike density in time bins for faster rendering
         const binSize = 10; // 10ms bins
         const numBins = Math.ceil(this.data.spikes.length / binSize);
-        const numNeurons = this.data.spikes[0].length;
+        const numNeurons = this.data.spikes[0] ? this.data.spikes[0].length : 0;
+        
+        if (numNeurons === 0) return;
         
         this.spikeDensity = new Float32Array(numBins * numNeurons);
         
@@ -116,8 +118,16 @@ export class NeuralVisualizer {
     }
     
     processConnectivity(weights) {
+        // Validate input
+        if (!weights || weights.length === 0) {
+            console.warn('No weight data available for connectivity visualization');
+            return;
+        }
+        
         // Create connectivity matrix visualization
         const numNeurons = Math.min(weights.length, 256);
+        if (numNeurons === 0) return;
+        
         const imageData = this.connectivityCtx.createImageData(numNeurons, numNeurons);
         const data = imageData.data;
         
@@ -205,13 +215,26 @@ export class NeuralVisualizer {
         const width = this.renderBuffer.width;
         const height = this.renderBuffer.height;
         
+        // Check if we have spike data
+        if (!this.data.spikes || this.data.spikes.length === 0) {
+            // Draw placeholder message
+            ctx.fillStyle = '#444';
+            ctx.font = '14px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('No neural data available', width / 2, height / 2);
+            return;
+        }
+        
         // Calculate visible time range
         const startTime = Math.max(0, this.currentTime - this.params.timeWindow / 2);
         const endTime = Math.min(this.data.spikes.length, 
                                 this.currentTime + this.params.timeWindow / 2);
         
         // Calculate neuron range to display
-        const totalNeurons = this.data.spikes[0].length;
+        const totalNeurons = this.data.spikes[0] ? this.data.spikes[0].length : 0;
+        if (totalNeurons === 0) return;
+        
         const displayNeurons = Math.min(totalNeurons, this.params.maxNeurons);
         const neuronStep = Math.ceil(totalNeurons / displayNeurons);
         

@@ -102,18 +102,22 @@ export class TimelineController {
         });
         
         // High value states
-        if (this.data.values && window.ss) {
-            const valueThreshold = window.ss.quantile(this.data.values, 0.9);
-            this.data.values.forEach((value, time) => {
-                if (value > valueThreshold) {
-                    this.events.push({
-                        time,
-                        type: 'highValue',
-                        value,
-                        color: '#00e676'
-                    });
-                }
-            });
+        if (this.data.values && this.data.values.length > 0 && window.ss) {
+            try {
+                const valueThreshold = window.ss.quantile(this.data.values, 0.9);
+                this.data.values.forEach((value, time) => {
+                    if (value > valueThreshold) {
+                        this.events.push({
+                            time,
+                            type: 'highValue',
+                            value,
+                            color: '#00e676'
+                        });
+                    }
+                });
+            } catch (e) {
+                console.warn('Could not calculate value quantiles:', e);
+            }
         }
         
         // High neural activity

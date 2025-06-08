@@ -37,7 +37,6 @@ class SNNVisualizationApp {
         // Initialize UI elements
         this.elements = {
             experimentSelect: document.getElementById('experiment-select'),
-            episodeSelect: document.getElementById('episode-select'),
             playPauseBtn: document.getElementById('play-pause-btn'),
             exportBtn: document.getElementById('export-btn'),
             speedControl: document.getElementById('speed-control'),
@@ -69,12 +68,6 @@ class SNNVisualizationApp {
             }
         });
         
-        // Episode selection
-        this.elements.episodeSelect.addEventListener('change', async (e) => {
-            if (e.target.value) {
-                await this.loadEpisode(parseInt(e.target.value));
-            }
-        });
         
         // Playback controls
         this.elements.playPauseBtn.addEventListener('click', () => {
@@ -145,8 +138,6 @@ class SNNVisualizationApp {
             // Update charts with aggregate data
             this.chartManager.updateLearningCurve(analysis.aggregate.learning_curve);
             
-            // Enable controls
-            this.elements.episodeSelect.disabled = false;
             
         } catch (error) {
             console.error('Failed to load experiment:', error);
@@ -222,7 +213,6 @@ class SNNVisualizationApp {
             `;
             
             item.addEventListener('click', () => {
-                this.elements.episodeSelect.value = ep.episode_id;
                 this.loadEpisode(ep.episode_id);
             });
             
@@ -237,14 +227,6 @@ class SNNVisualizationApp {
             listContainer.appendChild(item);
         });
         
-        // Update episode dropdown
-        this.elements.episodeSelect.innerHTML = '<option value="">Select Episode...</option>';
-        episodes.forEach(ep => {
-            const option = document.createElement('option');
-            option.value = ep.episode_id;
-            option.textContent = `Episode ${ep.episode_id}`;
-            this.elements.episodeSelect.appendChild(option);
-        });
     }
     
     updateStats(data) {
@@ -260,10 +242,13 @@ class SNNVisualizationApp {
     }
     
     calculateAvgFiringRate(neuralData) {
-        if (!neuralData || !neuralData.spikes) return 0;
+        if (!neuralData || !neuralData.spikes || neuralData.spikes.length === 0) return 0;
+        
+        // Check if spikes array has data
+        if (!neuralData.spikes[0] || neuralData.spikes[0].length === 0) return 0;
         
         const totalSpikes = neuralData.spikes.reduce((sum, row) => 
-            sum + row.reduce((a, b) => a + b, 0), 0
+            sum + (row ? row.reduce((a, b) => a + b, 0) : 0), 0
         );
         const duration = neuralData.spikes.length / 1000; // Convert ms to seconds
         const numNeurons = neuralData.spikes[0].length;

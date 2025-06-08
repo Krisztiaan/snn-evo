@@ -21,6 +21,11 @@ export class Viewport3D {
         this.rewards = [];
         this.heatmap = null;
         this.grid = null;
+        this.gridSize = [10, 10]; // Default grid size
+        
+        // Camera controls
+        this.followAgent = false;
+        this.showHeatmap = false;
         
         // Performance optimization
         this.frameSkip = 0;
@@ -37,12 +42,13 @@ export class Viewport3D {
         // Setup Three.js scene
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x0a0a0a);
-        this.scene.fog = new THREE.Fog(0x0a0a0a, 10, 50);
+        // No fog - we want to see everything from any distance
         
         // Setup camera
         const aspect = this.container.clientWidth / this.container.clientHeight;
-        this.camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 100);
-        this.camera.position.set(15, 20, 15);
+        this.camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 1000);
+        // Initial position - will be updated when data is loaded
+        this.camera.position.set(20, 15, 5);
         this.camera.lookAt(5, 0, 5);
         
         // Setup renderer with optimization
@@ -67,6 +73,9 @@ export class Viewport3D {
         
         // Handle resize
         window.addEventListener('resize', () => this.onResize());
+        
+        // Setup camera control checkboxes
+        this.setupCameraControls();
         
         // Start render loop
         this.animate();
@@ -98,7 +107,7 @@ export class Viewport3D {
             spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi));
             
             this.camera.position.setFromSpherical(spherical);
-            this.camera.lookAt(5, 0, 5);
+            this.camera.lookAt(this.gridSize[0] / 2, 0, this.gridSize[1] / 2);
             
             mouseX = e.clientX;
             mouseY = e.clientY;
@@ -114,6 +123,34 @@ export class Viewport3D {
             const scale = e.deltaY > 0 ? 1.1 : 0.9;
             this.camera.position.multiplyScalar(scale);
         });
+    }
+    
+    setupCameraControls() {
+        const followCheckbox = document.getElementById('camera-follow');
+        const heatmapCheckbox = document.getElementById('show-heatmap');
+        
+        if (followCheckbox) {
+            followCheckbox.addEventListener('change', (e) => {
+                this.followAgent = e.target.checked;
+                if (!this.followAgent) {
+                    // Reset camera when turning off follow mode
+                    const centerX = this.gridSize[0] / 2;
+                    const centerZ = this.gridSize[1] / 2;
+                    const distance = Math.max(this.gridSize[0], this.gridSize[1]) * 1.5;
+                    this.camera.position.set(centerX + distance, distance * 0.7, centerZ);
+                    this.camera.lookAt(centerX, 0, centerZ);
+                }
+            });
+        }
+        
+        if (heatmapCheckbox) {
+            heatmapCheckbox.addEventListener('change', (e) => {
+                this.showHeatmap = e.target.checked;
+                if (this.heatmap) {
+                    this.heatmap.visible = this.showHeatmap;
+                }
+            });
+        }
     }
     
     setupLights() {
@@ -132,8 +169,16 @@ export class Viewport3D {
     }
     
     setupGrid() {
+        // Clear existing grid if any
+        if (this.grid) {
+            this.scene.remove(this.grid);
+            this.grid.geometry.dispose();
+            this.grid.material.dispose();
+        }
+        
         // Create efficient grid using instanced mesh
-        const gridSize = 10;
+        const gridSizeX = this.gridSize[0];
+        const gridSizeZ = this.gridSize[1];
         const cellSize = 1;
         
         // Grid lines
@@ -142,17 +187,21 @@ export class Viewport3D {
         const gridColors = [];
         
         // Create grid lines
-        for (let i = 0; i <= gridSize; i++) {
+        for (let i = 0; i <= gridSizeX; i++) {
             const color = i % 5 === 0 ? [0.4, 0.4, 0.4] : [0.2, 0.2, 0.2];
             
-            // Horizontal lines
-            gridPositions.push(0, 0, i);
-            gridPositions.push(gridSize, 0, i);
-            gridColors.push(...color, ...color);
-            
-            // Vertical lines
+            // Lines along Z axis
             gridPositions.push(i, 0, 0);
-            gridPositions.push(i, 0, gridSize);
+            gridPositions.push(i, 0, gridSizeZ);
+            gridColors.push(...color, ...color);
+        }
+        
+        for (let i = 0; i <= gridSizeZ; i++) {
+            const color = i % 5 === 0 ? [0.4, 0.4, 0.4] : [0.2, 0.2, 0.2];
+            
+            // Lines along X axis
+            gridPositions.push(0, 0, i);
+            gridPositions.push(gridSizeX, 0, i);
             gridColors.push(...color, ...color);
         }
         
@@ -170,7 +219,7 @@ export class Viewport3D {
         this.scene.add(this.grid);
         
         // Grid plane for raycasting
-        const planeGeometry = new THREE.PlaneGeometry(gridSize, gridSize);
+        const planeGeometry = new THREE.PlaneGeometry(gridSizeX, gridSizeZ);
         const planeMaterial = new THREE.MeshBasicMaterial({
             color: 0x1a1a1a,
             transparent: true,
@@ -178,13 +227,32 @@ export class Viewport3D {
         });
         const plane = new THREE.Mesh(planeGeometry, planeMaterial);
         plane.rotation.x = -Math.PI / 2;
-        plane.position.set(gridSize / 2, -0.01, gridSize / 2);
+        plane.position.set(gridSizeX / 2, -0.01, gridSizeZ / 2);
         this.scene.add(plane);
+        
+        // Also update camera to look at the center of the grid
+        this.camera.lookAt(gridSizeX / 2, 0, gridSizeZ / 2);
     }
     
     setData(data) {
         this.data = data;
         this.currentTime = 0;
+        
+        // Extract grid size from metadata if available
+        console.log('Viewport3D setData - metadata:', data.metadata);
+        if (data.metadata && data.metadata.grid_size) {
+            this.gridSize = data.metadata.grid_size;
+            console.log('Setting grid size to:', this.gridSize);
+            // Recreate grid with new size
+            this.setupGrid();
+            // Update camera position for new grid - view from side
+            const centerX = this.gridSize[0] / 2;
+            const centerZ = this.gridSize[1] / 2;
+            const distance = Math.max(this.gridSize[0], this.gridSize[1]) * 1.5;
+            // Position camera to view from the side (along X axis)
+            this.camera.position.set(centerX + distance, distance * 0.7, centerZ);
+            this.camera.lookAt(centerX, 0, centerZ);
+        }
         
         // Clear existing objects
         this.clearVisualization();
@@ -241,36 +309,35 @@ export class Viewport3D {
     }
     
     createTrajectory() {
-        // Use line geometry for efficient trajectory rendering
-        const maxPoints = Math.min(this.data.trajectory.x.length, 10000);
-        const geometry = new THREE.BufferGeometry();
-        
-        // Pre-allocate buffer
-        const positions = new Float32Array(maxPoints * 3);
-        const colors = new Float32Array(maxPoints * 3);
-        
-        geometry.setAttribute('position', 
-            new THREE.BufferAttribute(positions, 3));
-        geometry.setAttribute('color', 
-            new THREE.BufferAttribute(colors, 3));
-            
-        // Material with vertex colors
+        // Instead of a single line, use line segments to handle toroidal wrapping
         const material = new THREE.LineBasicMaterial({
-            vertexColors: true,
+            color: 0x4a9eff,
             linewidth: 2,
             transparent: true,
             opacity: 0.8
         });
         
-        this.trajectory = new THREE.Line(geometry, material);
-        this.trajectory.frustumCulled = false;
-        this.scene.add(this.trajectory);
+        // Create a group to hold trajectory segments
+        this.trajectoryGroup = new THREE.Group();
+        this.scene.add(this.trajectoryGroup);
+        
+        // We'll create segments dynamically in updateTrajectory
+        this.trajectorySegments = [];
         
         // Trail end marker
         const markerGeometry = new THREE.SphereGeometry(0.1, 8, 8);
         const markerMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
         this.trailMarker = new THREE.Mesh(markerGeometry, markerMaterial);
+        this.trailMarker.visible = false; // Start hidden
         this.scene.add(this.trailMarker);
+    }
+    
+    isWrapping(x1, y1, x2, y2) {
+        // Detect if movement wrapped around the grid
+        const dx = Math.abs(x2 - x1);
+        const dy = Math.abs(y2 - y1);
+        const threshold = Math.min(this.gridSize[0], this.gridSize[1]) * 0.5;
+        return dx > threshold || dy > threshold;
     }
     
     createRewards() {
@@ -384,12 +451,31 @@ export class Viewport3D {
         if (time > 0) {
             const prevX = this.data.trajectory.x[time - 1];
             const prevY = this.data.trajectory.y[time - 1];
-            const dx = x - prevX;
-            const dy = y - prevY;
+            let dx = x - prevX;
+            let dy = y - prevY;
+            
+            // Check for wrapping
+            if (Math.abs(dx) > this.gridSize[0] * 0.5) {
+                dx = dx > 0 ? dx - this.gridSize[0] : dx + this.gridSize[0];
+            }
+            if (Math.abs(dy) > this.gridSize[1] * 0.5) {
+                dy = dy > 0 ? dy - this.gridSize[1] : dy + this.gridSize[1];
+            }
             
             if (Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001) {
                 this.agent.rotation.y = Math.atan2(dx, dy);
             }
+        }
+        
+        // Update camera if following
+        if (this.followAgent && this.agent) {
+            const offset = 10;
+            this.camera.position.set(
+                this.agent.position.x + offset,
+                offset,
+                this.agent.position.z + offset
+            );
+            this.camera.lookAt(this.agent.position);
         }
         
         // Update agent glow based on neural activity
@@ -408,61 +494,71 @@ export class Viewport3D {
         this.updateRewards(time);
         
         // Update trail marker
-        if (time > 0) {
+        if (time > 100) {
+            this.trailMarker.visible = true;
             const trailEnd = Math.max(0, time - 100);
             this.trailMarker.position.set(
                 this.data.trajectory.x[trailEnd],
                 0.1,
                 this.data.trajectory.y[trailEnd]
             );
+        } else {
+            this.trailMarker.visible = false;
         }
     }
     
     updateTrajectory(currentTime) {
-        const positions = this.trajectory.geometry.attributes.position;
-        const colors = this.trajectory.geometry.attributes.color;
+        // Clear existing segments
+        this.trajectoryGroup.children.forEach(child => {
+            child.geometry.dispose();
+        });
+        this.trajectoryGroup.clear();
         
         // Determine visible range (show last N points)
         const trailLength = 1000;
         const startTime = Math.max(0, currentTime - trailLength);
-        const visiblePoints = currentTime - startTime;
         
-        // Update positions and colors
-        for (let i = 0; i < visiblePoints; i++) {
-            const t = startTime + i;
+        if (startTime >= currentTime) return;
+        
+        // Build segments, breaking at wrap points
+        let segmentPoints = [];
+        let lastX = this.data.trajectory.x[startTime];
+        let lastY = this.data.trajectory.y[startTime];
+        
+        for (let t = startTime; t <= currentTime && t < this.data.trajectory.x.length; t++) {
+            const x = this.data.trajectory.x[t];
+            const y = this.data.trajectory.y[t];
             
-            positions.setXYZ(i, 
-                this.data.trajectory.x[t],
-                0.1,
-                this.data.trajectory.y[t]
-            );
-            
-            // Color based on value or reward
-            const value = this.data.values ? this.data.values[t] : 0;
-            const reward = this.data.rewards[t];
-            
-            if (reward > 0) {
-                colors.setXYZ(i, 1, 0.9, 0); // Yellow for rewards
-            } else {
-                const intensity = Math.max(0, Math.min(1, value));
-                colors.setXYZ(i, 
-                    intensity,
-                    0.5 + intensity * 0.5,
-                    1 - intensity
-                );
+            // Check for wrapping
+            if (t > startTime && this.isWrapping(lastX, lastY, x, y)) {
+                // Create segment with current points
+                if (segmentPoints.length > 1) {
+                    this.createTrajectorySegment(segmentPoints);
+                }
+                segmentPoints = [];
             }
+            
+            segmentPoints.push(new THREE.Vector3(x, 0.1, y));
+            lastX = x;
+            lastY = y;
         }
         
-        // Hide unused points
-        for (let i = visiblePoints; i < positions.count; i++) {
-            positions.setXYZ(i, 0, -100, 0);
+        // Create final segment
+        if (segmentPoints.length > 1) {
+            this.createTrajectorySegment(segmentPoints);
         }
-        
-        positions.needsUpdate = true;
-        colors.needsUpdate = true;
-        
-        // Update geometry bounding sphere for culling
-        this.trajectory.geometry.computeBoundingSphere();
+    }
+    
+    createTrajectorySegment(points) {
+        const geometry = new THREE.BufferGeometry().setFromPoints(points);
+        const material = new THREE.LineBasicMaterial({
+            color: 0x4a9eff,
+            linewidth: 2,
+            transparent: true,
+            opacity: 0.8
+        });
+        const line = new THREE.Line(geometry, material);
+        this.trajectoryGroup.add(line);
     }
     
     updateRewards(time) {
@@ -529,12 +625,14 @@ export class Viewport3D {
             this.agent = null;
         }
         
-        // Remove trajectory
-        if (this.trajectory) {
-            this.trajectory.geometry.dispose();
-            this.trajectory.material.dispose();
-            this.scene.remove(this.trajectory);
-            this.trajectory = null;
+        // Remove trajectory segments
+        if (this.trajectoryGroup) {
+            this.trajectoryGroup.children.forEach(child => {
+                child.geometry.dispose();
+                child.material.dispose();
+            });
+            this.scene.remove(this.trajectoryGroup);
+            this.trajectoryGroup = null;
         }
         
         // Remove rewards

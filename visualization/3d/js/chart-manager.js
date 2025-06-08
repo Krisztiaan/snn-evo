@@ -346,7 +346,7 @@ export class ChartManager {
         metrics.rewardRate = metrics.totalReward / this.data.rewards.length * 1000; // per second
         
         // Value function metrics
-        if (this.data.values) {
+        if (this.data.values && this.data.values.length > 0) {
             metrics.averageValue = window.ss.mean(this.data.values);
             metrics.valueVariance = window.ss.variance(this.data.values);
         }
@@ -360,10 +360,12 @@ export class ChartManager {
         metrics.explorationCoverage = positions.size / 100; // Assuming 10x10 grid
         
         // Neural metrics
-        if (this.data.neural && this.data.neural.spikes) {
+        if (this.data.neural && this.data.neural.spikes && this.data.neural.spikes.length > 0) {
             const firingRates = this.calculateFiringRates(this.data.neural.spikes);
-            metrics.peakFiringRate = window.ss.max(firingRates);
-            metrics.averageFiringRate = window.ss.mean(firingRates);
+            if (firingRates && firingRates.length > 0) {
+                metrics.peakFiringRate = window.ss.max(firingRates);
+                metrics.averageFiringRate = window.ss.mean(firingRates);
+            }
         }
         
         this.metrics = metrics;
@@ -397,9 +399,9 @@ export class ChartManager {
     }
     
     createHistogram(data, bins) {
-        // Check if simple-statistics is loaded
-        if (!window.ss) {
-            console.warn('Simple-statistics library not loaded');
+        // Check if simple-statistics is loaded and data is valid
+        if (!window.ss || !data || data.length === 0) {
+            console.warn('Simple-statistics library not loaded or no data available');
             return { labels: [], counts: [] };
         }
         

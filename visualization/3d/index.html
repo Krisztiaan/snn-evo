@@ -272,9 +272,6 @@
             <select id="experiment-select">
                 <option value="">Select Experiment...</option>
             </select>
-            <select id="episode-select" disabled>
-                <option value="">Select Episode...</option>
-            </select>
             <button id="play-pause-btn" disabled>▶ Play</button>
             <button id="export-btn" disabled>Export Data</button>
             <div style="margin-left: auto; display: flex; gap: 0.5rem; align-items: center;">
@@ -310,6 +307,18 @@
             <main id="viewport">
                 <div class="loading-overlay" id="loading">
                     <div class="loading-spinner"></div>
+                </div>
+                
+                <!-- Camera controls -->
+                <div style="position: absolute; top: 10px; right: 10px; background: rgba(26, 26, 26, 0.9); padding: 10px; border-radius: 4px;">
+                    <label style="color: #888; font-size: 0.85rem; display: block; margin-bottom: 5px;">
+                        <input type="checkbox" id="camera-follow" style="margin-right: 5px;">
+                        Follow Agent
+                    </label>
+                    <label style="color: #888; font-size: 0.85rem; display: block;">
+                        <input type="checkbox" id="show-heatmap" style="margin-right: 5px;">
+                        Show Heatmap
+                    </label>
                 </div>
                 
                 <!-- Timeline controls -->
