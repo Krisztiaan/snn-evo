@@ -75,6 +75,7 @@ class AgentState(NamedTuple):
 
 class PrecomputedConstants(NamedTuple):
     """Precomputed constants for efficiency."""
+
     syn_e_decay: float
     syn_i_decay: float
     trace_fast_decay: float
@@ -112,7 +113,9 @@ def _encode_gradient_population(
     gradient: float, params: NetworkParams, key: random.PRNGKey
 ) -> jnp.ndarray:
     preferred_values = jnp.linspace(0, 1, params.NUM_INPUT_CHANNELS)
-    activations = jnp.exp(-((gradient - preferred_values) ** 2) / (2 * params.INPUT_TUNING_WIDTH**2))
+    activations = jnp.exp(
+        -((gradient - preferred_values) ** 2) / (2 * params.INPUT_TUNING_WIDTH**2)
+    )
     noise = random.normal(key, activations.shape) * 0.05
     activations = jnp.maximum(activations + noise, 0.0)
     total_activation = jnp.sum(activations)
@@ -209,7 +212,9 @@ def _learning_step(
     # Eligibility Trace (STDP)
     pre_trace = constants.zero_input_buffer.at[params.NUM_INPUT_CHANNELS :].set(state.trace_fast)
     ltp = pre_trace[None, :] * state.spike_float_buffer[:, None]
-    pre_spike = constants.zero_input_buffer.at[params.NUM_INPUT_CHANNELS :].set(state.spike_float_buffer)
+    pre_spike = constants.zero_input_buffer.at[params.NUM_INPUT_CHANNELS :].set(
+        state.spike_float_buffer
+    )
     ltd = pre_spike[None, :] * state.trace_fast[:, None]
     stdp = params.STDP_A_PLUS * ltp - params.STDP_A_MINUS * ltd
     stdp = jnp.where(state.w_plastic_mask, stdp, 0.0)
@@ -218,8 +223,8 @@ def _learning_step(
     # Weight update
     adaptive_lr = _get_adaptive_learning_rate(state, params)
     dw = adaptive_lr * modulation * new_eligibility
-    new_momentum = (
-        state.weight_momentum * params.WEIGHT_MOMENTUM_DECAY + dw * (1 - params.WEIGHT_MOMENTUM_DECAY)
+    new_momentum = state.weight_momentum * params.WEIGHT_MOMENTUM_DECAY + dw * (
+        1 - params.WEIGHT_MOMENTUM_DECAY
     )
     weight_penalty = params.WEIGHT_DECAY * state.w * state.w_plastic_mask
     w_new = state.w + new_momentum - weight_penalty
@@ -387,7 +392,10 @@ def _log_weight_changes(
         old_w = w_old_np[tgt, src]
         new_w = old_w + dw_np[tgt, src]
         exporter.log_weight_change(
-            timestep=step, synapse_id=(int(src), int(tgt)), old_weight=float(old_w), new_weight=float(new_w)
+            timestep=step,
+            synapse_id=(int(src), int(tgt)),
+            old_weight=float(old_w),
+            new_weight=float(new_w),
         )
 
 
@@ -562,7 +570,9 @@ class SnnAgent:
 
             # Log changes (Python side)
             if exporter:
-                _log_weight_changes(exporter, step, w_old, dw, self.state.w_plastic_mask, log_key, self.params)
+                _log_weight_changes(
+                    exporter, step, w_old, dw, self.state.w_plastic_mask, log_key, self.params
+                )
 
             # Step the world
             result = self.world.step(world_state, int(action), world_key)
@@ -639,6 +649,7 @@ class SnnAgent:
             output_base_dir=self.config.exp_config.export_dir,
             compression="gzip",
             compression_level=1,
+            flush_at_episode_end=True,  # Enable new flushing strategy
             no_write=no_write,
         )
         with exporter:
@@ -651,7 +662,9 @@ class SnnAgent:
 
             for i in range(self.config.exp_config.n_episodes):
                 print(f"\n--- Episode {i + 1}/{self.config.exp_config.n_episodes} ---")
-                print(f"Current learning rate: {_get_adaptive_learning_rate(self.state, self.params):.6f}")
+                print(
+                    f"Current learning rate: {_get_adaptive_learning_rate(self.state, self.params):.6f}"
+                )
                 print(f"Current temperature: {self.state.current_temperature:.3f}")
 
                 episode_key, self.master_key = random.split(self.master_key)

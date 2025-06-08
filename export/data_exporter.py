@@ -45,6 +45,7 @@ class DataExporter:
         enable_profiling: bool = False,
         n_async_workers: int = 4,
         no_write: bool = False,
+        flush_at_episode_end: bool = False,
     ):
         """Initialize the data exporter.
 
@@ -63,11 +64,13 @@ class DataExporter:
             enable_profiling: Enable detailed performance profiling.
             n_async_workers: Number of worker threads for asynchronous writing.
             no_write: If True, all file I/O operations are skipped. For benchmarking.
+            flush_at_episode_end: If True, data is buffered in memory per episode and flushed to disk only at episode end.
         """
         self.experiment_name = experiment_name
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.output_dir = Path(output_base_dir) / f"{experiment_name}_{self.timestamp}"
         self.no_write = no_write
+        self.flush_at_episode_end = flush_at_episode_end
 
         # Core configuration
         self.config: Dict[str, Any] = {
@@ -76,6 +79,7 @@ class DataExporter:
             "compression": compression,
             "compression_opts": compression_level,
             "chunk_size": chunk_size,
+            "flush_at_episode_end": self.flush_at_episode_end,  # Pass down
         }
 
         # Performance components
@@ -120,7 +124,7 @@ class DataExporter:
             else:
                 self.h5_file = h5py.File(h5_path, "w")
         except Exception as e:
-            raise RuntimeError(f"Failed to create HDF5 file at {h5_path}: {e}")
+            raise RuntimeError(f"Failed to create HDF5 file at {h5_path}: {e}") from e
 
         with _HDF5_LOCK:
             self.h5_file.attrs["experiment_name"] = self.experiment_name

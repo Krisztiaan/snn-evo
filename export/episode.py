@@ -59,12 +59,15 @@ class BufferedDataset:
         compression_opts: int,
         async_queue: Optional[AsyncWriteQueue],
         memory_tracker: MemoryTracker,
+        flush_at_episode_end: bool = False,
     ):
         self.name = name
         self.chunk_size = chunk_size
         self.async_queue = async_queue
         self.memory_tracker = memory_tracker
+        self.flush_at_episode_end = flush_at_episode_end
         self._lock = threading.Lock()
+        self.pending_data_blocks: list[np.ndarray] = []
 
         item_shape = shape[1:] if len(shape) > 1 else ()
         self.buffer_threshold = max(1, min(chunk_size // 10, DEFAULT_BUFFER_THRESHOLD))
@@ -97,27 +100,69 @@ class BufferedDataset:
         with self._lock:
             self.buffer[self.buffer_pos] = data
             self.buffer_pos += 1
-            if self.buffer_pos >= self.buffer_threshold or self.memory_tracker.should_flush():
-                self._flush_unlocked()
+
+            # Condition 1: Must flush this buffer to disk due to overall memory pressure
+            # This check is crucial to prevent unbounded memory growth if MemoryTracker signals.
+            if self.memory_tracker.should_flush() and self.buffer_pos > 0:
+                self._flush_current_buffer_to_disk()  # This writes to HDF5 and resets buffer_pos
+
+            # Condition 2: Buffer is full (check buffer_pos again as it might have been reset by memory pressure flush)
+            if self.buffer_pos >= self.buffer_threshold:
+                if self.flush_at_episode_end:
+                    # Accumulate in memory if flush_at_episode_end is true
+                    self.pending_data_blocks.append(self.buffer[: self.buffer_pos].copy())
+                    self.buffer_pos = 0  # Buffer is now considered "empty" for new appends
+                else:
+                    # Not flush_at_episode_end, so flush to disk as usual
+                    self._flush_current_buffer_to_disk()
 
     def flush(self) -> None:
         with self._lock:
-            self._flush_unlocked()
+            # Always handle any remaining data in the primary buffer first.
+            if self.buffer_pos > 0:
+                if self.flush_at_episode_end:
+                    # If configured to flush at episode end, move remaining buffer to pending blocks.
+                    self.pending_data_blocks.append(self.buffer[: self.buffer_pos].copy())
+                    self.buffer_pos = 0
+                else:
+                    # Otherwise, flush the current buffer to disk directly.
+                    self._flush_current_buffer_to_disk()
 
-    def _flush_unlocked(self) -> None:
+            # If there are pending blocks (only if flush_at_episode_end was true), flush them now.
+            if self.pending_data_blocks:
+                self._flush_all_pending_blocks_to_disk()
+
+    def _flush_current_buffer_to_disk(self) -> None:
+        # Renamed from _flush_unlocked; handles writing self.buffer to disk
         if self.buffer_pos == 0:
             return
         new_data = self.buffer[: self.buffer_pos]
         n_new = self.buffer_pos
-        self.buffer_pos = 0
+        self.buffer_pos = 0  # Reset buffer position
 
         if self.async_queue and n_new > ASYNC_THRESHOLD:
             data_copy = new_data.copy()
             start_idx = self.current_size
-            self.current_size += n_new
+            # Important: self.current_size is updated optimistically for async writes.
+            # The actual HDF5 file size grows when the async worker processes it.
+            with self._lock:  # Protect current_size update for async scenario
+                self.current_size += n_new
             self.async_queue.submit(self._do_async_write, data_copy, start_idx)
         else:
-            self._do_sync_write(new_data)
+            self._do_sync_write(new_data)  # This updates self.current_size internally
+
+    def _flush_all_pending_blocks_to_disk(self) -> None:
+        # Writes all accumulated pending_data_blocks to disk.
+        # Uses synchronous writes for simplicity and safety with current_size updates.
+        for block_data in self.pending_data_blocks:
+            self._do_sync_write(block_data)  # _do_sync_write updates self.current_size
+        self.pending_data_blocks.clear()
+
+    def _flush_unlocked(self) -> None:
+        # This method is now effectively replaced by _flush_current_buffer_to_disk
+        # and the logic in append/flush.
+        # For safety, let's make it call the new primary flush mechanism for the buffer.
+        self._flush_current_buffer_to_disk()
 
     def _do_sync_write(self, new_data: np.ndarray) -> None:
         n_new = len(new_data)
@@ -198,7 +243,7 @@ class Episode:
         if self.validate_data:
             warnings_list = validate_timestep_data(**kwargs)
             for w in warnings_list:
-                warnings.warn(f"Validation: {w}")
+                warnings.warn(f"Validation: {w}", stacklevel=2)
 
         self.timestep_count += 1
         timestep = kwargs["timestep"]
@@ -308,6 +353,7 @@ class EpisodeDataManager:
         self.config = config
         self.memory_tracker = memory_tracker
         self.datasets: Dict[str, BufferedDataset] = {}
+        self.flush_at_episode_end = self.config.get("flush_at_episode_end", False)
 
     def get_or_create_dataset(
         self, subgroup: h5py.Group, name: str, dtype: np.dtype, shape: Tuple[int, ...]
@@ -324,6 +370,7 @@ class EpisodeDataManager:
                 compression_opts=self.config.get("compression_opts", 4),
                 async_queue=self.config.get("async_queue"),
                 memory_tracker=self.memory_tracker,
+                flush_at_episode_end=self.flush_at_episode_end,
             )
         return self.datasets[key]
 
