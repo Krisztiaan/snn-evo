@@ -20,20 +20,15 @@ def check_dependencies():
         import uvicorn
         import h5py
         import msgpack
-        import lz4
         return True
     except ImportError as e:
         print(f"Missing dependency: {e}")
         print("\nPlease install visualization dependencies with:")
-        print("  uv pip install -e '.[visualization]'")
-        print("\nOr from the project root:")
-        print("  uv sync --extra visualization")
+        print("  pip install fastapi uvicorn h5py msgpack")
         return False
 
-def start_servers():
-    """Start both the API server and static file server"""
-    processes = []
-    
+def start_server():
+    """Start the API server which also serves static files"""
     # Start API server
     api_server_path = Path(__file__).parent / "server.py"
     api_process = subprocess.Popen(
@@ -42,41 +37,24 @@ def start_servers():
         stderr=subprocess.PIPE,
         text=True
     )
-    processes.append(api_process)
     
-    # Start static file server
-    static_server_path = Path(__file__).parent / "simple_server.py"
-    static_process = subprocess.Popen(
-        [sys.executable, str(static_server_path)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True
-    )
-    processes.append(static_process)
-    
-    # Wait for servers to start
-    print("Starting visualization servers...")
+    # Wait for server to start
+    print("Starting visualization server...")
     time.sleep(3)
     
-    # Check if servers started successfully
-    for i, process in enumerate(processes):
-        if process.poll() is not None:
-            stdout, stderr = process.communicate()
-            print(f"Server {i} failed to start:")
-            print(stderr)
-            # Kill other process
-            for p in processes:
-                if p.poll() is None:
-                    p.terminate()
-            return None
+    # Check if server started successfully
+    if api_process.poll() is not None:
+        stdout, stderr = api_process.communicate()
+        print("Server failed to start:")
+        print(stderr)
+        return None
     
-    print("API server started on http://localhost:8080")
-    print("Static server started on http://localhost:8081")
-    return processes
+    print("Server started on http://localhost:8080")
+    return api_process
 
 def open_browser():
     """Open the visualization in the default browser"""
-    url = "http://localhost:8081/index.html"
+    url = "http://localhost:8080/static/index.html"
     
     print(f"Opening visualization at: {url}")
     webbrowser.open(url)
@@ -90,9 +68,9 @@ def main():
     if not check_dependencies():
         sys.exit(1)
     
-    # Start servers
-    server_processes = start_servers()
-    if not server_processes:
+    # Start server
+    server_process = start_server()
+    if not server_process:
         sys.exit(1)
     
     # Open browser
@@ -100,27 +78,23 @@ def main():
     open_browser()
     
     print("\nVisualization is running!")
-    print("Press Ctrl+C to stop the servers and exit.\n")
+    print("Press Ctrl+C to stop the server and exit.\n")
     
     # Keep running until interrupted
     try:
         while True:
-            # Check if servers are still running
-            for process in server_processes:
-                if process.poll() is not None:
-                    print("A server stopped unexpectedly")
-                    # Stop all servers
-                    for p in server_processes:
-                        if p.poll() is None:
-                            p.terminate()
-                    return
+            # Check if server is still running
+            if server_process.poll() is not None:
+                print("Server stopped unexpectedly")
+                stdout, stderr = server_process.communicate()
+                print("Error output:", stderr)
+                return
             time.sleep(1)
     except KeyboardInterrupt:
         print("\n\nShutting down...")
-        for process in server_processes:
-            process.terminate()
-            process.wait(timeout=5)
-        print("Servers stopped.")
+        server_process.terminate()
+        server_process.wait(timeout=5)
+        print("Server stopped.")
 
 if __name__ == "__main__":
     main()

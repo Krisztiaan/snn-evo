@@ -5,279 +5,121 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SNN Agent Scientific Visualization</title>
     
+    <!-- Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    
+    <!-- Tippy.js for tooltips -->
+    <script src="https://unpkg.com/@popperjs/core@2"></script>
+    <script src="https://unpkg.com/tippy.js@6"></script>
+    
+    <!-- Styles -->
+    <link rel="stylesheet" href="css/main.css">
+    <link rel="stylesheet" href="https://unpkg.com/tippy.js@6/themes/light.css">
+    
+    <!-- Performance optimizations -->
+    <style>
+        /* GPU acceleration */
+        #viewport { transform: translateZ(0); will-change: transform; }
+        
+        /* Performance monitor */
+        .performance-monitor {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 12px;
+            border-radius: 4px;
+            z-index: 1000;
+        }
+        .perf-row { margin: 2px 0; }
+        .quality-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+    </style>
+    
     <!-- Local dependencies -->
     <script src="js/vendor/three.min.js"></script>
+    <script src="js/vendor/OrbitControls.js"></script>
     <script src="js/vendor/chart.umd.min.js"></script>
     <script src="js/vendor/simple-statistics.min.js"></script>
     <script src="js/vendor/msgpack.min.js"></script>
     
-    <style>
-        /* Reset and base styles */
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #0a0a0a;
-            color: #e0e0e0;
-            overflow: hidden;
-        }
-        
-        /* Layout grid */
-        #app {
-            display: grid;
-            grid-template-rows: 48px 1fr;
-            height: 100vh;
-            width: 100vw;
-        }
-        
-        /* Header */
-        .header {
-            background: #1a1a1a;
-            border-bottom: 1px solid #333;
-            display: flex;
-            align-items: center;
-            padding: 0 1rem;
-            gap: 1rem;
-        }
-        
-        .header h1 {
-            font-size: 1.2rem;
-            font-weight: 500;
-        }
-        
-        .header select, .header button {
-            background: #2a2a2a;
-            color: #e0e0e0;
-            border: 1px solid #444;
-            padding: 0.4rem 0.8rem;
-            border-radius: 4px;
-            font-size: 0.9rem;
-        }
-        
-        .header button:hover {
-            background: #3a3a3a;
-            cursor: pointer;
-        }
-        
-        /* Main content area */
-        .main-content {
-            display: grid;
-            grid-template-columns: 300px 1fr 350px;
-            height: 100%;
-            overflow: hidden;
-        }
-        
-        /* Panels */
-        .panel {
-            background: #1a1a1a;
-            border-right: 1px solid #333;
-            overflow-y: auto;
-            padding: 1rem;
-        }
-        
-        .panel:last-child {
-            border-right: none;
-            border-left: 1px solid #333;
-        }
-        
-        .panel h2 {
-            font-size: 1rem;
-            font-weight: 500;
-            margin-bottom: 1rem;
-            color: #b0b0b0;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-        
-        /* 3D Viewport */
-        #viewport {
-            position: relative;
-            background: #000;
-        }
-        
-        #viewport canvas {
-            display: block;
-        }
-        
-        /* Timeline controls */
-        .timeline-container {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            background: rgba(26, 26, 26, 0.95);
-            backdrop-filter: blur(10px);
-            border-top: 1px solid #333;
-            padding: 1rem;
-        }
-        
-        .timeline-controls {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-            margin-bottom: 0.5rem;
-        }
-        
-        .timeline-slider {
-            flex: 1;
-            height: 6px;
-            background: #2a2a2a;
-            border-radius: 3px;
-            position: relative;
-            cursor: pointer;
-        }
-        
-        .timeline-progress {
-            height: 100%;
-            background: #4a9eff;
-            border-radius: 3px;
-            position: relative;
-        }
-        
-        .timeline-handle {
-            position: absolute;
-            top: -4px;
-            right: -7px;
-            width: 14px;
-            height: 14px;
-            background: #fff;
-            border-radius: 50%;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.5);
-            cursor: grab;
-        }
-        
-        .timeline-handle:active {
-            cursor: grabbing;
-        }
-        
-        /* Stats panels */
-        .stat-card {
-            background: #2a2a2a;
-            border-radius: 6px;
-            padding: 1rem;
-            margin-bottom: 1rem;
-        }
-        
-        .stat-label {
-            font-size: 0.8rem;
-            color: #888;
-            margin-bottom: 0.2rem;
-        }
-        
-        .stat-value {
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: #4a9eff;
-        }
-        
-        /* Charts */
-        .chart-container {
-            background: #2a2a2a;
-            border-radius: 6px;
-            padding: 1rem;
-            margin-bottom: 1rem;
-            height: 200px;
-            position: relative;
-        }
-        
-        /* Neural visualization */
-        .neural-viewer {
-            background: #000;
-            border-radius: 6px;
-            height: 300px;
-            position: relative;
-            overflow: hidden;
-        }
-        
-        /* Loading and status */
-        .loading-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0,0,0,0.8);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 1000;
-        }
-        
-        .loading-spinner {
-            width: 40px;
-            height: 40px;
-            border: 3px solid #333;
-            border-top-color: #4a9eff;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-        
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-        
-        /* Tooltips */
-        .tooltip {
-            position: absolute;
-            background: rgba(0,0,0,0.9);
-            color: #fff;
-            padding: 0.5rem 0.8rem;
-            border-radius: 4px;
-            font-size: 0.85rem;
-            pointer-events: none;
-            z-index: 100;
-            opacity: 0;
-            transition: opacity 0.2s;
-        }
-        
-        .tooltip.visible {
-            opacity: 1;
-        }
-        
-        /* Responsive adjustments */
-        @media (max-width: 1200px) {
-            .main-content {
-                grid-template-columns: 250px 1fr 300px;
-            }
-        }
-        
-        /* Custom scrollbar */
-        .panel::-webkit-scrollbar {
-            width: 8px;
-        }
-        
-        .panel::-webkit-scrollbar-track {
-            background: #1a1a1a;
-        }
-        
-        .panel::-webkit-scrollbar-thumb {
-            background: #444;
-            border-radius: 4px;
-        }
-        
-        .panel::-webkit-scrollbar-thumb:hover {
-            background: #555;
-        }
-    </style>
+    <!-- Alpine components -->
+    <script src="js/alpine-stores.js"></script>
+    <script src="js/alpine-app.js"></script>
+    <script src="js/alpine-tooltips.js"></script>
 </head>
 <body>
-    <div id="app">
+    <div id="app" x-data="app" x-init="init()"
+         @keydown.space.window.prevent="togglePlayback()"
+         @keydown.left.window="step(-100)"
+         @keydown.right.window="step(100)"
+         @keydown.r.window="modules.viewport?.resetCamera()"
+         @keydown.p.window="ui.showPerformance = !ui.showPerformance"
+         @keydown.q.window="ui.quality = ui.quality === 'high' ? 'low' : ui.quality === 'medium' ? 'high' : 'medium'"
+         @load-episode.window="loadEpisode($event.detail.id)">
+        
+        <!-- Performance Monitor -->
+        <div class="performance-monitor" x-show="ui.showPerformance" x-data="performanceMonitor">
+            <div class="perf-row">
+                <span class="quality-indicator" :style="`background: ${qualityColor}`"></span>
+                <span x-text="displayFPS"></span>
+            </div>
+            <div class="perf-row">Frame: <span x-text="displayFrameTime"></span></div>
+            <div class="perf-row">Quality: <span x-text="ui.quality"></span></div>
+        </div>
+        
         <!-- Header -->
         <header class="header">
             <h1>SNN Agent Visualization</h1>
-            <select id="experiment-select">
+            <select x-model="data.currentExperiment" @change="loadExperiment()" 
+                    :disabled="ui.loading">
                 <option value="">Select Experiment...</option>
+                <template x-for="exp in data.experiments" :key="exp.experiment_id">
+                    <option :value="exp.experiment_id" 
+                            x-text="`${exp.experiment_id} (${exp.num_episodes} episodes)`">
+                    </option>
+                </template>
             </select>
-            <button id="play-pause-btn" disabled>▶ Play</button>
-            <button id="export-btn" disabled>Export Data</button>
-            <div style="margin-left: auto; display: flex; gap: 0.5rem; align-items: center;">
-                <span style="font-size: 0.8rem; color: #888;">Speed:</span>
-                <input type="range" id="speed-control" min="0.1" max="5" step="0.1" value="1" style="width: 100px;">
-                <span id="speed-display" style="font-size: 0.8rem; color: #888;">1.0x</span>
+            <button @click="togglePlayback()" 
+                    :disabled="!data.episodeData"
+                    x-text="playback.playing ? '⏸ Pause' : '▶ Play'"
+                    x-tooltip="'Space bar to toggle'">
+            </button>
+            <button @click="exportData()" 
+                    :disabled="!data.episodeData"
+                    x-tooltip="'Export current episode data'">
+                Export Data
+            </button>
+            <div style="margin-left: auto; display: flex; gap: 1rem; align-items: center;">
+                <label class="text-small">
+                    Speed:
+                    <select x-model="playback.speed">
+                        <option value="0.5">0.5x</option>
+                        <option value="1">1x</option>
+                        <option value="2">2x</option>
+                        <option value="5">5x</option>
+                    </select>
+                </label>
+                <label class="text-small">
+                    Quality:
+                    <select x-model="ui.quality">
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                    </select>
+                </label>
+                <button @click="ui.showPerformance = !ui.showPerformance" 
+                        x-text="ui.showPerformance ? 'Hide Perf' : 'Show Perf'"
+                        x-tooltip="'Press P to toggle'">
+                </button>
             </div>
         </header>
         
@@ -286,57 +128,64 @@
             <!-- Left panel: Episode list and stats -->
             <aside class="panel" id="left-panel">
                 <h2>Episodes</h2>
-                <div id="episode-list"></div>
+                <div id="episode-list" x-data="episodes">
+                    <template x-for="episode in data.episodes" :key="episode.episode_id">
+                        <div class="episode-item" 
+                             @click="selectEpisode(episode.episode_id)"
+                             :class="{'selected': data.currentEpisode === episode.episode_id}">
+                            <div style="font-weight: 500;" x-text="`Episode ${episode.episode_id}`"></div>
+                            <div class="text-small text-muted" style="margin-top: 0.2rem;">
+                                <span x-text="`Reward: ${episode.total_reward.toFixed(1)}`"></span> |
+                                <span x-text="`Length: ${episode.episode_length}`"></span>
+                            </div>
+                        </div>
+                    </template>
+                </div>
                 
                 <h2 style="margin-top: 2rem;">Statistics</h2>
                 <div class="stat-card">
                     <div class="stat-label">Total Reward</div>
-                    <div class="stat-value" id="stat-total-reward">-</div>
+                    <div class="stat-value" x-text="stats.totalReward"></div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">Episode Length</div>
-                    <div class="stat-value" id="stat-episode-length">-</div>
+                    <div class="stat-value" x-text="stats.episodeLength"></div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">Avg Firing Rate</div>
-                    <div class="stat-value" id="stat-firing-rate">-</div>
+                    <div class="stat-value" x-text="stats.firingRate"></div>
                 </div>
             </aside>
             
             <!-- Center: 3D viewport -->
             <main id="viewport">
-                <div class="loading-overlay" id="loading">
+                <div class="loading-overlay" x-show="ui.loading" x-transition>
                     <div class="loading-spinner"></div>
                 </div>
                 
                 <!-- Camera controls -->
-                <div style="position: absolute; top: 10px; right: 10px; background: rgba(26, 26, 26, 0.9); padding: 10px; border-radius: 4px;">
-                    <label style="color: #888; font-size: 0.85rem; display: block; margin-bottom: 5px;">
-                        <input type="checkbox" id="camera-follow" style="margin-right: 5px;">
+                <div class="camera-controls">
+                    <label>
+                        <input type="checkbox" x-model="ui.cameraFollow">
                         Follow Agent
-                    </label>
-                    <label style="color: #888; font-size: 0.85rem; display: block;">
-                        <input type="checkbox" id="show-heatmap" style="margin-right: 5px;">
-                        Show Heatmap
                     </label>
                 </div>
                 
                 <!-- Timeline controls -->
-                <div class="timeline-container">
+                <div class="timeline-container" x-data="timeline">
                     <div class="timeline-controls">
-                        <span id="time-display">0:00</span>
-                        <div class="timeline-slider" id="timeline">
-                            <div class="timeline-progress" id="timeline-progress">
-                                <div class="timeline-handle" id="timeline-handle"></div>
-                            </div>
-                        </div>
-                        <span id="time-total">0:00</span>
+                        <span x-text="utils.formatTime(playback.time)">0:00</span>
+                        <input type="range" 
+                               class="timeline-range"
+                               x-model="playback.time"
+                               :max="playback.duration">
+                        <span x-text="utils.formatTime(playback.duration)">0:00</span>
                     </div>
-                    <canvas id="timeline-heatmap" height="20" style="width: 100%; margin-top: 0.5rem;"></canvas>
+                    <div class="timeline-heatmap" 
+                         style="background: linear-gradient(to right, #1a1a1a 0%, #4a9eff 50%, #1a1a1a 100%)"></div>
                 </div>
                 
-                <!-- Tooltip -->
-                <div class="tooltip" id="tooltip"></div>
+                <!-- Tooltips are now handled by Tippy.js -->
             </main>
             
             <!-- Right panel: Neural data and analytics -->
@@ -355,9 +204,20 @@
                     <canvas id="value-chart"></canvas>
                 </div>
                 
-                <h2 style="margin-top: 1rem;">Connectivity</h2>
-                <div class="chart-container" style="height: 150px;">
-                    <canvas id="connectivity-chart"></canvas>
+                <h2 style="margin-top: 1rem;">Experiment Info</h2>
+                <div class="info-card" x-show="data.currentExperiment">
+                    <div class="info-row">
+                        <span class="info-label">Experiment:</span>
+                        <span x-text="data.currentExperiment"></span>
+                    </div>
+                    <div class="info-row" x-show="data.episodes.length">
+                        <span class="info-label">Episodes:</span>
+                        <span x-text="data.episodes.length"></span>
+                    </div>
+                    <div class="info-row" x-show="data.currentEpisode">
+                        <span class="info-label">Current:</span>
+                        <span x-text="`Episode ${data.currentEpisode}`"></span>
+                    </div>
                 </div>
             </aside>
         </div>
@@ -365,6 +225,8 @@
     
     <!-- Load polyfills and modules -->
     <script src="js/polyfills.js"></script>
+    
+    
     <script type="module" src="js/app.js"></script>
 </body>
 </html>

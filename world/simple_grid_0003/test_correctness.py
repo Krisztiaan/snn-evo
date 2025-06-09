@@ -151,7 +151,7 @@ def test_performance_consistency():
     print("\nTesting performance consistency...")
 
     # Compare with baseline implementation
-    from simple_grid_0001 import SimpleGridWorld as BaselineWorld
+    from simple_grid_0003 import SimpleGridWorld as BaselineWorld
 
     config = WorldConfig(grid_size=50, n_rewards=10, max_timesteps=1000)
     world_v3 = SimpleGridWorld(config)

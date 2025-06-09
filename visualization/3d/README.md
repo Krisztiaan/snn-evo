@@ -1,6 +1,6 @@
 # SNN Agent Scientific Visualization System
 
-A high-performance, modular visualization system for analyzing Spiking Neural Network (SNN) agent behavior, neural dynamics, and learning progress.
+A high-performance, modular visualization system for analyzing Spiking Neural Network (SNN) agent behavior, neural dynamics, and learning progress. Built with AlpineJS for reactive UI and Three.js for 3D visualization.
 
 ## Features
 
@@ -88,10 +88,11 @@ server.py
 └── REST Endpoints     # Experiments, episodes, analysis
 ```
 
-### Frontend (Modular ES6)
+### Frontend (AlpineJS + Modular ES6)
 ```
+index.html             # AlpineJS reactive UI
 js/
-├── app.js              # Main coordinator
+├── app.js              # Module exports
 ├── data-manager.js     # API communication, caching
 ├── viewport-3d.js      # Three.js visualization
 ├── neural-visualizer.js # Spike rasters, connectivity
@@ -99,6 +100,8 @@ js/
 ├── timeline-controller.js # Temporal navigation
 └── export-manager.js   # Data export functionality
 ```
+
+The UI is built with AlpineJS for reactive state management, providing clean separation between UI logic and visualization modules. All state is managed in the Alpine component, while visualization modules handle rendering.
 
 ## Performance Benchmarks
 

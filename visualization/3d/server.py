@@ -520,15 +520,10 @@ async def get_trajectory(
     # Get position data
     x = behavior["pos_x"][:] if "pos_x" in behavior else np.array([])
     y = behavior["pos_y"][:] if "pos_y" in behavior else np.array([])
+    original_length = len(x)
 
-    # Apply decimation if needed
-    if decimation > 1 and len(x) > DECIMATION_THRESHOLD:
-        indices = np.arange(0, len(x), decimation)
-        x = x[indices]
-        y = y[indices]
-
-    # Extract rewards from events
-    rewards = np.zeros(len(x))
+    # Extract rewards BEFORE decimation to preserve all reward locations
+    rewards_full = np.zeros(original_length)
     if "events" in episode:
         events_group = episode["events"]
         for event_key in events_group.keys():
@@ -536,8 +531,26 @@ async def get_trajectory(
                 event = events_group[event_key]
                 timestep = event.attrs.get("timestep", -1)
                 value = event.attrs.get("value", 1.0)
-                if 0 <= timestep < len(rewards):
-                    rewards[timestep] = value
+                if 0 <= timestep < original_length:
+                    rewards_full[timestep] = value
+
+    # Apply smart decimation if needed
+    if decimation > 1 and len(x) > DECIMATION_THRESHOLD:
+        # Keep important points (rewards, start, end)
+        important_indices = set([0, len(x) - 1])
+        important_indices.update(np.where(rewards_full > 0)[0])
+        
+        # Regular decimation indices
+        regular_indices = set(range(0, len(x), decimation))
+        
+        # Combine and sort
+        indices = sorted(important_indices | regular_indices)
+        
+        x = x[indices]
+        y = y[indices]
+        rewards = rewards_full[indices]
+    else:
+        rewards = rewards_full
 
     # Values not present in current data format, use zeros
     values = np.zeros(len(x))
@@ -558,9 +571,16 @@ async def get_trajectory(
         if "world_config" in config_group.attrs:
             world_config = config_group.attrs["world_config"]
             if isinstance(world_config, (np.ndarray, np.void)):
-                # For phase 0.13, infer grid size from actual data
-                # The world_config array doesn't contain grid size directly
-                grid_size = [100, 100]  # Default for phase 0.13
+                # For phase 0.13, the grid size is typically 10x10
+                grid_size = [10, 10]
+                # Try to get from agent_config if available
+                if "agent_config" in config_group.attrs:
+                    try:
+                        agent_config = json.loads(config_group.attrs["agent_config"])
+                        if "grid_size" in agent_config:
+                            grid_size = agent_config["grid_size"]
+                    except:
+                        pass
             else:
                 try:
                     world_data = json.loads(world_config)
