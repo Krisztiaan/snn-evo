@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}SNN Meta-Learning Analytics{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_prefix }}static/css/style.css">
+    <link rel="stylesheet" href="https://cdn.datatables.net/2.3.2/css/dataTables.dataTables.min.css">
+</head>
+<body>
+    <header>
+        <h1>SNN Meta-Learning Analytics</h1>
+        <nav>
+            <a href="{{ url_prefix }}index.html">Dashboard</a>
+        </nav>
+    </header>
+    
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+    
+    <footer>
+        <p>Generated on {{ generation_time }}</p>
+    </footer>
+    
+    <!-- External Libraries -->
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+    <script src="https://cdn.datatables.net/2.3.2/js/dataTables.min.js"></script>
+    
+    <!-- Custom JavaScript -->
+    <script src="{{ url_prefix }}static/js/app.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

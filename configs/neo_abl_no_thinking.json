@@ -1,8 +1,8 @@
 {
   "world": {
     "grid_size": 20,
-    "n_rewards": 70,
-    "max_timesteps": 5000
+    "n_rewards": 125,
+    "max_timesteps": 8000
   },
   "neural": {
     "n_neurons": 256,

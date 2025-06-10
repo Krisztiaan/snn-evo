@@ -1,0 +1,697 @@
+/* keywords: [visualization, css, styling, dashboard, analytics] */
+
+/* Reset and base styles */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+    line-height: 1.6;
+    color: #1e293b;
+    background-color: #f8fafc;
+}
+
+/* Header */
+header {
+    background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+    color: white;
+    padding: 1.5rem 0;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+header h1 {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 2rem;
+    font-size: 2rem;
+    font-weight: 600;
+}
+
+header nav {
+    max-width: 1200px;
+    margin: 0.5rem auto 0;
+    padding: 0 2rem;
+}
+
+header nav a {
+    color: #cbd5e1;
+    text-decoration: none;
+    transition: color 0.2s;
+}
+
+header nav a:hover {
+    color: white;
+}
+
+/* Main content */
+main {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 2rem;
+}
+
+/* Dashboard specific */
+.dashboard-container h2 {
+    font-size: 1.75rem;
+    margin-bottom: 2rem;
+    color: #0f172a;
+}
+
+/* Stats panel */
+.stats-panel {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 3rem;
+}
+
+.stat-card {
+    background: white;
+    padding: 1.5rem;
+    border-radius: 12px;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.stat-card h3 {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.5rem;
+}
+
+.stat-value {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: #0f172a;
+    line-height: 1;
+}
+
+.stat-label {
+    font-size: 0.875rem;
+    color: #64748b;
+    margin-top: 0.25rem;
+}
+
+/* Plot section */
+.plot-section {
+    background: white;
+    padding: 2rem;
+    border-radius: 12px;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    margin-bottom: 3rem;
+}
+
+.plot-section h3 {
+    font-size: 1.5rem;
+    margin-bottom: 1rem;
+    color: #0f172a;
+}
+
+.plot-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+    border-bottom: 2px solid #e2e8f0;
+}
+
+/* Tab buttons */
+.tab-button {
+    padding: 0.75rem 1.5rem;
+    border: none;
+    background: none;
+    color: #64748b;
+    font-weight: 500;
+    cursor: pointer;
+    position: relative;
+    transition: color 0.2s;
+}
+
+.tab-button:hover {
+    color: #0f172a;
+}
+
+.tab-button.active {
+    color: #3b82f6;
+}
+
+.tab-button.active::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: #3b82f6;
+}
+
+/* Plot containers */
+.plot-container {
+    width: 100%;
+    height: 500px;
+    display: none;
+}
+
+.plot-container.active-plot {
+    display: block;
+}
+
+/* Table section */
+.table-section {
+    background: white;
+    padding: 2rem;
+    border-radius: 12px;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.table-section h3 {
+    font-size: 1.5rem;
+    margin-bottom: 1.5rem;
+    color: #0f172a;
+}
+
+/* DataTable styling overrides */
+table.dataTable {
+    width: 100% !important;
+    border-collapse: collapse;
+}
+
+table.dataTable thead th {
+    background: #f8fafc;
+    color: #475569;
+    font-weight: 600;
+    text-align: left;
+    padding: 1rem;
+    border-bottom: 2px solid #e2e8f0;
+}
+
+table.dataTable tbody td {
+    padding: 1rem;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+table.dataTable tbody tr:hover {
+    background: #f8fafc;
+}
+
+.exp-name {
+    font-weight: 500;
+    color: #0f172a;
+}
+
+.numeric {
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+    text-align: right;
+}
+
+td.positive {
+    color: #28a745; /* Green */
+    font-weight: bold;
+}
+
+td.negative {
+    color: #dc3545; /* Red */
+    font-weight: bold;
+}
+
+.params {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.param {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+    background: #f1f5f9;
+    border-radius: 4px;
+    color: #475569;
+}
+
+.param-enabled {
+    background: #dbeafe;
+    color: #1e40af;
+    font-weight: 500;
+}
+
+.param-chip {
+    display: inline-block;
+    padding: 2px 8px;
+    margin: 2px;
+    font-size: 0.8em;
+    border-radius: 12px;
+    background-color: #e9ecef;
+    color: #495057;
+}
+
+/* Style for DataTables */
+#experiments-table_wrapper {
+    margin-top: 20px;
+}
+
+/* Buttons */
+.btn {
+    display: inline-block;
+    padding: 0.5rem 1rem;
+    text-decoration: none;
+    border-radius: 6px;
+    font-weight: 500;
+    transition: all 0.2s;
+    cursor: pointer;
+    border: none;
+}
+
+.btn-primary {
+    background: #3b82f6;
+    color: white;
+}
+
+.btn-primary:hover {
+    background: #2563eb;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+
+/* Run detail page */
+.run-detail-container {
+    background: white;
+    padding: 2rem;
+    border-radius: 12px;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.run-header {
+    border-bottom: 2px solid #e2e8f0;
+    padding-bottom: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.run-header h2 {
+    font-size: 1.75rem;
+    color: #0f172a;
+    margin-bottom: 0.5rem;
+}
+
+.run-meta {
+    display: flex;
+    gap: 2rem;
+    color: #64748b;
+}
+
+.run-meta strong {
+    color: #0f172a;
+}
+
+/* Tab container */
+.tab-container {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 2rem;
+    border-bottom: 2px solid #e2e8f0;
+}
+
+.tab-content {
+    display: none;
+    animation: fadeIn 0.3s ease-in;
+}
+
+.tab-content.active-tab {
+    display: block;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* Summary grid */
+.summary-grid {
+    display: grid;
+    grid-template-columns: 1fr 2fr;
+    gap: 2rem;
+}
+
+.metric-panel, .config-panel {
+    background: #f8fafc;
+    padding: 1.5rem;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+}
+
+.metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+}
+
+.metric {
+    padding: 1rem;
+    background: white;
+    border-radius: 6px;
+    border: 1px solid #e2e8f0;
+}
+
+.metric-label {
+    display: block;
+    font-size: 0.875rem;
+    color: #64748b;
+    margin-bottom: 0.25rem;
+}
+
+.metric-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+/* Config sections */
+.config-sections details {
+    margin-bottom: 1rem;
+}
+
+.config-sections summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: #0f172a;
+    padding: 0.75rem;
+    background: white;
+    border-radius: 6px;
+    border: 1px solid #e2e8f0;
+    user-select: none;
+}
+
+.config-sections summary:hover {
+    background: #f1f5f9;
+}
+
+.config-content {
+    padding: 1rem;
+    margin-top: 0.5rem;
+}
+
+.config-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.config-item:last-child {
+    border-bottom: none;
+}
+
+.config-key {
+    color: #64748b;
+}
+
+.config-value {
+    font-weight: 500;
+    color: #0f172a;
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+}
+
+/* Plots grid */
+.plots-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 2rem;
+}
+
+/* Playback controls */
+.playback-controls {
+    display: flex;
+    gap: 2rem;
+    align-items: center;
+    padding: 1.5rem;
+    background: #f8fafc;
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+}
+
+.episode-selector label,
+.timestep-controls label {
+    font-weight: 500;
+    color: #475569;
+    margin-right: 0.5rem;
+}
+
+.episode-selector select {
+    padding: 0.5rem 1rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    background: white;
+    font-size: 1rem;
+    cursor: pointer;
+}
+
+#play-pause-btn {
+    padding: 0.5rem 1.5rem;
+    background: #10b981;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+#play-pause-btn:hover {
+    background: #059669;
+}
+
+#speed-control {
+    width: 100px;
+}
+
+#timestep-display {
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+    color: #0f172a;
+    font-weight: 500;
+}
+
+/* Timestep slider */
+.timestep-slider-container {
+    padding: 1rem 2rem;
+    background: white;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+    margin-bottom: 2rem;
+}
+
+#timestep-slider {
+    width: 100%;
+    height: 8px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: #e2e8f0;
+    outline: none;
+    border-radius: 4px;
+}
+
+#timestep-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    background: #3b82f6;
+    cursor: pointer;
+    border-radius: 50%;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+#timestep-slider::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    background: #3b82f6;
+    cursor: pointer;
+    border-radius: 50%;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+/* Playback visualizations */
+.playback-visualizations {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+}
+
+.playback-panel {
+    background: white;
+    padding: 1.5rem;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+}
+
+.playback-panel h4 {
+    font-size: 1.125rem;
+    margin-bottom: 1rem;
+    color: #0f172a;
+}
+
+.timeline-plot,
+.heatmap-plot,
+.bar-plot {
+    height: 300px;
+}
+
+.info-panel {
+    padding: 1rem;
+    background: #f8fafc;
+    border-radius: 6px;
+}
+
+.info-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.info-item:last-child {
+    border-bottom: none;
+}
+
+.info-label {
+    color: #64748b;
+    font-weight: 500;
+}
+
+.info-value {
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+    font-weight: 600;
+    color: #0f172a;
+}
+
+/* Network visualization */
+.network-controls {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    margin-bottom: 1.5rem;
+}
+
+.network-controls button {
+    padding: 0.5rem 1rem;
+    background: #3b82f6;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.network-controls button:hover {
+    background: #2563eb;
+}
+
+.network-container {
+    height: 600px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    margin-bottom: 2rem;
+}
+
+.network-stats {
+    background: white;
+    padding: 1.5rem;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+}
+
+.network-stats h4 {
+    font-size: 1.125rem;
+    margin-bottom: 1rem;
+    color: #0f172a;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+}
+
+.stat {
+    padding: 1rem;
+    background: #f8fafc;
+    border-radius: 6px;
+}
+
+.stat-label {
+    display: block;
+    font-size: 0.875rem;
+    color: #64748b;
+    margin-bottom: 0.25rem;
+}
+
+.stat-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+/* Footer */
+footer {
+    text-align: center;
+    padding: 2rem;
+    color: #64748b;
+    font-size: 0.875rem;
+    border-top: 1px solid #e2e8f0;
+    margin-top: 4rem;
+}
+
+/* Responsive design */
+@media (max-width: 1024px) {
+    .summary-grid,
+    .plots-grid,
+    .playback-visualizations {
+        grid-template-columns: 1fr;
+    }
+    
+    .playback-controls {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}
+
+@media (max-width: 768px) {
+    main {
+        padding: 1rem;
+    }
+    
+    .stats-panel {
+        grid-template-columns: 1fr;
+    }
+    
+    .plot-tabs {
+        flex-wrap: wrap;
+    }
+    
+    .tab-button {
+        padding: 0.5rem 1rem;
+        font-size: 0.875rem;
+    }
+    
+    table.dataTable {
+        font-size: 0.875rem;
+    }
+    
+    .params {
+        display: none;
+    }
+}

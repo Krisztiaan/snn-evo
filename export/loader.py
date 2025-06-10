@@ -66,7 +66,7 @@ class ExperimentLoader:
             return config
         
         # Fallback to JSON file
-        config_path = self.h5_path.parent / "config.json"
+        config_path = self.h5_path.parent / "experiment_config.json"
         if config_path.exists():
             with open(config_path, "r") as f:
                 return json.load(f)

@@ -1,0 +1,255 @@
+{% extends "base.html" %}
+{% block title %}{{ exp.name }} - SNN Analytics{% endblock %}
+
+{% block content %}
+<div class="run-detail-container">
+    <div class="run-header">
+        <h2>{{ exp.name }}</h2>
+        <div class="run-meta">
+            <span>Agent: <strong>{{ exp.agent }}</strong></span>
+            <span>Episodes: <strong>{{ exp.total_episodes }}</strong></span>
+            <span>Avg Reward: <strong>{{ "%.2f"|format(exp.metrics.avg_reward) }}</strong></span>
+        </div>
+    </div>
+    
+    <!-- Tab Navigation -->
+    <div class="tab-container">
+        <button class="tab-button active" onclick="openTab(event, 'summary')">Summary & Config</button>
+        <button class="tab-button" onclick="openTab(event, 'progression')">Episode Progression</button>
+        <button class="tab-button" onclick="openTab(event, 'playback')">Episode Playback</button>
+        <button class="tab-button" onclick="openTab(event, 'network')">Network Structure</button>
+    </div>
+    
+    <!-- Tab 1: Summary & Configuration -->
+    <div id="summary" class="tab-content active-tab">
+        <div class="summary-grid">
+            <div class="metric-panel">
+                <h3>Key Metrics</h3>
+                <div class="metrics-grid">
+                    <div class="metric">
+                        <span class="metric-label">Average Reward</span>
+                        <span class="metric-value">{{ "%.2f"|format(exp.metrics.avg_reward) }}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Reward Std Dev</span>
+                        <span class="metric-value">{{ "%.2f"|format(exp.metrics.std_reward) }}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Avg Steps/Second</span>
+                        <span class="metric-value">{{ "%.0f"|format(exp.metrics.avg_steps_per_second) }}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Learning Progress</span>
+                        <span class="metric-value {{ 'positive' if exp.metrics.learning_progress > 0 else 'negative' }}">
+                            {{ "%.2f"|format(exp.metrics.learning_progress) }}
+                        </span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="config-panel">
+                <h3>Configuration</h3>
+                <div class="config-sections">
+                    {% if exp.config.neural %}
+                    <details open>
+                        <summary>Neural Architecture</summary>
+                        <div class="config-content">
+                            {% for key, value in exp.config.neural.items() %}
+                            <div class="config-item">
+                                <span class="config-key">{{ key }}:</span>
+                                <span class="config-value">{{ value }}</span>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </details>
+                    {% endif %}
+                    
+                    {% if exp.config.learning_rules %}
+                    <details>
+                        <summary>Learning Rules</summary>
+                        <div class="config-content">
+                            {% for key, value in exp.config.learning_rules.items() %}
+                            <div class="config-item">
+                                <span class="config-key">{{ key }}:</span>
+                                <span class="config-value">{{ value }}</span>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </details>
+                    {% endif %}
+                    
+                    {% if exp.config.world %}
+                    <details>
+                        <summary>World Configuration</summary>
+                        <div class="config-content">
+                            {% for key, value in exp.config.world.items() %}
+                            <div class="config-item">
+                                <span class="config-key">{{ key }}:</span>
+                                <span class="config-value">{{ value }}</span>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </details>
+                    {% endif %}
+                    
+                    {% for section_key, section_value in exp.config.items() %}
+                        {% if section_key not in ['neural', 'learning_rules', 'world'] and section_value is mapping %}
+                        <details>
+                            <summary>{{ section_key | title }}</summary>
+                            <div class="config-content">
+                                {% for key, value in section_value.items() %}
+                                <div class="config-item">
+                                    <span class="config-key">{{ key }}:</span>
+                                    <span class="config-value">{{ value }}</span>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </details>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Tab 2: Episode Progression -->
+    <div id="progression" class="tab-content">
+        <h3>Performance Over Episodes</h3>
+        <div class="plots-grid">
+            <div id="reward-progression-plot" class="plot-container"></div>
+            <div id="steps-progression-plot" class="plot-container"></div>
+            <div id="entropy-progression-plot" class="plot-container"></div>
+            <div id="activity-progression-plot" class="plot-container"></div>
+        </div>
+    </div>
+    
+    <!-- Tab 3: Episode Playback -->
+    <div id="playback" class="tab-content">
+        <h3>Episode Analysis</h3>
+        
+        <div class="playback-controls">
+            <div class="episode-selector">
+                <label for="episode-select">Select Episode:</label>
+                <select id="episode-select" onchange="loadEpisode(this.value)">
+                    {% for ep_id in exp.episodes.keys() %}
+                    <option value="{{ ep_id }}">{{ ep_id }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            
+            <div class="timestep-controls">
+                <button id="play-pause-btn" onclick="togglePlayback()">▶ Play</button>
+                <label for="speed-control">Speed:</label>
+                <input type="range" id="speed-control" min="1" max="10" value="5">
+                <span id="timestep-display">Step: 0 / 0</span>
+            </div>
+        </div>
+        
+        <div class="timestep-slider-container">
+            <input type="range" id="timestep-slider" min="0" max="100" value="0" 
+                   oninput="updatePlayback(this.value)">
+        </div>
+        
+        <div class="playback-visualizations">
+            <div class="playback-panel">
+                <h4>Reward Timeline</h4>
+                <div id="reward-timeline" class="timeline-plot"></div>
+            </div>
+            
+            <div class="playback-panel">
+                <h4>Neural Activity</h4>
+                <div id="neural-heatmap" class="heatmap-plot"></div>
+            </div>
+            
+            <div class="playback-panel">
+                <h4>Action & State</h4>
+                <div id="action-info" class="info-panel">
+                    <div class="info-item">
+                        <span class="info-label">Current Action:</span>
+                        <span id="current-action" class="info-value">-</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Gradient:</span>
+                        <span id="current-gradient" class="info-value">-</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Reward:</span>
+                        <span id="current-reward" class="info-value">-</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="playback-panel">
+                <h4>Action Distribution</h4>
+                <div id="action-distribution" class="bar-plot"></div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Tab 4: Network Structure -->
+    <div id="network" class="tab-content">
+        <h3>Neural Network Structure</h3>
+        
+        <div class="network-controls">
+            <button onclick="resetNetworkView()">Reset View</button>
+            <label>
+                <input type="checkbox" id="show-connections" checked onchange="toggleConnections()">
+                Show Connections
+            </label>
+        </div>
+        
+        <div id="network-graph" class="network-container"></div>
+        
+        <div class="network-stats">
+            <h4>Network Statistics</h4>
+            <div class="stats-grid">
+                <div class="stat">
+                    <span class="stat-label">Total Neurons:</span>
+                    <span class="stat-value">{{ exp.network.neurons.neuron_ids|length if exp.network else 0 }}</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Total Connections:</span>
+                    <span class="stat-value">{{ exp.network.connections.source_ids|length if exp.network else 0 }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Embed experiment data -->
+<script>
+    const runData = {{ exp | tojson | safe }};
+</script>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Tab functionality
+    function openTab(evt, tabName) {
+        const tabcontent = document.getElementsByClassName("tab-content");
+        for (let i = 0; i < tabcontent.length; i++) {
+            tabcontent[i].classList.remove("active-tab");
+        }
+        
+        const tablinks = document.getElementsByClassName("tab-button");
+        for (let i = 0; i < tablinks.length; i++) {
+            tablinks[i].classList.remove("active");
+        }
+        
+        document.getElementById(tabName).classList.add("active-tab");
+        evt.currentTarget.classList.add("active");
+        
+        // Initialize content when tab is first opened
+        if (tabName === 'progression' && !window.progressionInitialized) {
+            initProgressionPlots();
+            window.progressionInitialized = true;
+        } else if (tabName === 'playback' && !window.playbackInitialized) {
+            initPlayback();
+            window.playbackInitialized = true;
+        } else if (tabName === 'network' && !window.networkInitialized) {
+            initNetworkGraph();
+            window.networkInitialized = true;
+        }
+    }
+</script>
+{% endblock %}

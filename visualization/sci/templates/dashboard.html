@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - SNN Analytics{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <h2>Experiment Dashboard</h2>
+    
+    <!-- Summary Statistics -->
+    <div class="stats-panel">
+        <div class="stat-card">
+            <h3>Total Experiments</h3>
+            <div class="stat-value">{{ experiments|length }}</div>
+        </div>
+        <div class="stat-card">
+            <h3>Best Avg Reward</h3>
+            <div class="stat-value">{{ "%.2f"|format(best_reward) }}</div>
+            <div class="stat-label">{{ best_experiment }}</div>
+        </div>
+        <div class="stat-card">
+            <h3>Agent Types</h3>
+            <div class="stat-value">{{ agent_types|length }}</div>
+        </div>
+    </div>
+    
+    <!-- Comparison Plots -->
+    <div class="plot-section">
+        <h3>Cross-Experiment Analysis</h3>
+        
+        <div class="plot-tabs">
+            <button class="tab-button active" onclick="showPlot('parallel')">Parallel Coordinates</button>
+            <button class="tab-button" onclick="showPlot('scatter')">Scatter Matrix</button>
+            <button class="tab-button" onclick="showPlot('boxplot')">Reward Distribution</button>
+        </div>
+        
+        <div id="parallel-plot" class="plot-container active-plot"></div>
+        <div id="scatter-plot" class="plot-container"></div>
+        <div id="boxplot-plot" class="plot-container"></div>
+    </div>
+    
+    <!-- Experiments Table -->
+    <div class="table-section">
+        <h3>All Experiments</h3>
+        <table id="experiments-table" class="display" style="width:100%">
+            <thead>
+                <tr>
+                    <th>Experiment Name</th>
+                    <th>Agent</th>
+                    <th>Date</th>
+                    <th># Episodes</th>
+                    <th>Avg Reward</th>
+                    <th>Reward Std</th>
+                    <th>Avg Steps/s</th>
+                    <th>Learning Progress</th>
+                    <th>Key Parameters</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for exp in experiments %}
+                <tr>
+                    <!-- Link the name to the detail page -->
+                    <td><a href="runs/{{ exp.name }}.html">{{ exp.name }}</a></td>
+                    <!-- Use the new agent_name field from the summary -->
+                    <td>{{ exp.summary.agent_name }}</td>
+                    <!-- Format the timestamp for readability -->
+                    <td>{{ exp.summary.timestamp | replace('_', ' ') }}</td>
+                    <td>{{ exp.summary.total_episodes }}</td>
+                    <!-- Use the robust reward_stats field -->
+                    <td>{{ "%.2f"|format(exp.summary.reward_stats.mean) }}</td>
+                    <td>{{ "%.2f"|format(exp.summary.reward_stats.std) }}</td>
+                    <!-- Calculate average steps/s from total duration -->
+                    <td>{{ "%.0f"|format((exp.summary.total_episodes * 500) / exp.summary.total_duration_seconds) if exp.summary.total_duration_seconds > 0 else 0 }}</td>
+                    
+                    <!-- Add conditional coloring for Learning Progress -->
+                    {% if exp.summary.learning_progress is defined %}
+                        {% set progress = exp.summary.learning_progress.improvement %}
+                        <td class="
+                            {% if progress > 0.1 %}positive{% endif %}
+                            {% if progress < -0.1 %}negative{% endif %}
+                        ">
+                            {{ "%.2f"|format(progress) }}
+                        </td>
+                    {% else %}
+                        <td>0.00</td>
+                    {% endif %}
+
+                    <!-- Display key parameters from the loaded config -->
+                    <td>
+                        {% if exp.config.neural is defined and exp.config.neural.n_neurons is defined %}
+                            <div class="param-chip">neurons: {{ exp.config.neural.n_neurons }}</div>
+                        {% endif %}
+                        {% if exp.config.world is defined and exp.config.world.grid_size is defined %}
+                            <div class="param-chip">grid: {{ exp.config.world.grid_size }}</div>
+                        {% endif %}
+                        {% if exp.config.plasticity is defined and exp.config.plasticity.enable_stdp is defined %}
+                            <div class="param-chip">stdp: {{ exp.config.plasticity.enable_stdp }}</div>
+                        {% elif exp.config.learning_rules is defined and exp.config.learning_rules.enable_stdp is defined %}
+                            <div class="param-chip">stdp: {{ exp.config.learning_rules.enable_stdp }}</div>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Embed data for JavaScript -->
+<script>
+    const experimentsData = {{ experiments_json | safe }};
+    const plotData = {{ plot_data | safe }};
+</script>
+{% endblock %}
+
+{% block scripts %}
+<!-- Include DataTables JS for sorting and searching -->
+<link rel="stylesheet" href="https://cdn.datatables.net/2.3.2/css/dataTables.dataTables.min.css">
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.datatables.net/2.3.2/js/dataTables.min.js"></script>
+<script>
+    // Initialize DataTable
+    $(document).ready(function() {
+        $('#experiments-table').DataTable({
+            "pageLength": 25,
+            "order": [[4, "desc"]], // Sort by avg reward descending
+            "columns": [
+                null, null, null,
+                { "type": "num" },
+                { "type": "num" },
+                { "type": "num" },
+                { "type": "num" },
+                { "type": "num" },
+                null
+            ]
+        });
+    });
+    
+    // Tab switching for plots
+    function showPlot(plotName) {
+        // Hide all plots
+        document.querySelectorAll('.plot-container').forEach(p => {
+            p.classList.remove('active-plot');
+        });
+        document.querySelectorAll('.tab-button').forEach(b => {
+            b.classList.remove('active');
+        });
+        
+        // Show selected plot
+        document.getElementById(plotName + '-plot').classList.add('active-plot');
+        event.target.classList.add('active');
+        
+        // Initialize plot if needed
+        if (plotName === 'scatter' && !window.scatterInitialized) {
+            initScatterPlot();
+            window.scatterInitialized = true;
+        } else if (plotName === 'boxplot' && !window.boxplotInitialized) {
+            initBoxPlot();
+            window.boxplotInitialized = true;
+        }
+    }
+</script>
+{% endblock %}

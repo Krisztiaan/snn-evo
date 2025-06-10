@@ -4,7 +4,8 @@
       "Bash(python:*)",
       "Bash(h5dump:*)",
       "Bash(pyright:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(open:*)"
     ],
     "deny": []
   }

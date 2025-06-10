@@ -355,6 +355,8 @@ class JaxDataExporter:
         
         summary = {
             "experiment_name": self.experiment_name,
+            # Get the agent name from HDF5 attributes, saved by the runner
+            "agent_name": self.h5_file.attrs.get("agent_name", "unknown"),
             "timestamp": self.timestamp,
             "total_episodes": self.episode_count,
             "total_duration_seconds": total_duration,
@@ -364,18 +366,22 @@ class JaxDataExporter:
                 "world_version": self.config.world_version,
                 "n_episodes": self.config.n_episodes,
                 "seed": self.config.seed
-            }
+            },
+            # Add default values for robustness in the template
+            "reward_stats": {"mean": 0.0, "std": 0.0, "min": 0.0, "max": 0.0},
+            "learning_progress": {"improvement": 0.0, "first_5_avg": 0.0, "last_5_avg": 0.0}
         }
         
         # Add aggregate statistics
         if self.episode_summaries:
             rewards = [s.get("total_reward", 0) for s in self.episode_summaries]
-            summary["reward_stats"] = {
-                "mean": np.mean(rewards),
-                "std": np.std(rewards),
-                "min": np.min(rewards),
-                "max": np.max(rewards)
-            }
+            if rewards:  # Ensure rewards list is not empty
+                summary["reward_stats"] = {
+                    "mean": np.mean(rewards),
+                    "std": np.std(rewards),
+                    "min": np.min(rewards),
+                    "max": np.max(rewards)
+                }
             
             # Learning progress
             if len(rewards) >= 10:
