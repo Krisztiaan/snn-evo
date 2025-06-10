@@ -10,8 +10,9 @@ import jax
 import jax.numpy as jnp
 from jax import Array
 
-from .base import AbstractLearningRule, NetworkState, RuleContext
+from .base import AbstractLearningRule, RuleContext
 from .registry import register_rule
+from models.phase_0_14_neo.state import NeoAgentState
 
 
 @register_rule("dale_principle", category="structural",
@@ -45,7 +46,7 @@ class DalePrincipleRule(AbstractLearningRule):
     def modifies(self) -> set[str]:
         return {"w"}
     
-    def apply(self, state: NetworkState, context: RuleContext) -> NetworkState:
+    def apply(self, state: NeoAgentState, context: RuleContext) -> NeoAgentState:
         """Enforce Dale's principle on weights."""
         # Create sign mask: +1 for excitatory, -1 for inhibitory
         sign_mask = jnp.where(state.is_excitatory, 1.0, -1.0)
@@ -134,11 +135,11 @@ class WeightBoundsRule(AbstractLearningRule):
     def modifies(self) -> set[str]:
         return {"w"}
     
-    def apply(self, state: NetworkState, context: RuleContext) -> NetworkState:
+    def apply(self, state: NeoAgentState, context: RuleContext) -> NeoAgentState:
         """Apply weight bounds."""
         if self.soft_bounds:
             # Soft bounds using tanh
-            if self.separate_ei and hasattr(state, 'is_excitatory'):
+            if self.separate_ei:
                 # Different bounds for E and I neurons
                 # Get dimensions
                 n_pre_total = state.w.shape[1]
@@ -216,7 +217,7 @@ class WeightDecayRule(AbstractLearningRule):
     def modifies(self) -> set[str]:
         return {"w"}
     
-    def apply(self, state: NetworkState, context: RuleContext) -> NetworkState:
+    def apply(self, state: NeoAgentState, context: RuleContext) -> NeoAgentState:
         """Apply weight decay."""
         # Calculate decay
         decay = self.decay_rate * (state.w - self.target_weight)
@@ -294,7 +295,7 @@ class WeightNormalizationRule(AbstractLearningRule):
     def modifies(self) -> set[str]:
         return {"w"}
     
-    def apply(self, state: NetworkState, context: RuleContext) -> NetworkState:
+    def apply(self, state: NeoAgentState, context: RuleContext) -> NeoAgentState:
         """Apply weight normalization."""
         if self.normalize_incoming:
             # Normalize each neuron's incoming weights (column-wise)
@@ -366,7 +367,7 @@ class SparsityRule(AbstractLearningRule):
     def modifies(self) -> set[str]:
         return {"w"}
     
-    def apply(self, state: NetworkState, context: RuleContext) -> NetworkState:
+    def apply(self, state: NeoAgentState, context: RuleContext) -> NeoAgentState:
         """Apply sparsity constraint."""
         # Get weight magnitudes
         w_abs = jnp.abs(state.w)

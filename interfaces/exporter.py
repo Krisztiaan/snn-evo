@@ -13,7 +13,7 @@ from pathlib import Path
 from jax import Array
 
 from .config import ExperimentConfig
-from .episode_data import EpisodeData
+from .episode_data import StepData
 
 @runtime_checkable
 class EpisodeBufferProtocol(Protocol):
@@ -32,13 +32,10 @@ class EpisodeBufferProtocol(Protocol):
 # Type alias for the JIT-compiled logging function
 LogTimestepFunction = Callable[
     [
-        EpisodeBufferProtocol,  # buffer: Current episode buffer to update
-        int,                    # timestep: Current simulation timestep (0-based counter)
-        Array,                  # gradient: Observation received from world (float32 scalar, 0-1)
-        int,                    # action: Action selected by agent (int 0-8)
-        Optional[Array]         # neural_state: Current neural state if applicable (shape: (n_neurons,) float32)
-    ], 
-    EpisodeBufferProtocol       # Returns: Updated buffer with new timestep appended
+        EpisodeBufferProtocol,  # buffer: Current episode buffer
+        StepData                # step_data: All data for the current timestep
+    ],
+    EpisodeBufferProtocol       # Returns: Updated buffer
 ]
 
 @runtime_checkable
@@ -90,7 +87,6 @@ class ExporterProtocol(Protocol):
     def end_episode(
         self,
         buffer: EpisodeBufferProtocol,
-        episode_data: EpisodeData,
         world_reward_tracking: Dict[str, Array],
         success: bool = False
     ) -> Dict[str, float]:
@@ -98,7 +94,6 @@ class ExporterProtocol(Protocol):
         
         Args:
             buffer: Final episode buffer from device
-            episode_data: Processed episode data from agent
             world_reward_tracking: Reward placement/collection data from world
             success: Whether episode ended successfully
             

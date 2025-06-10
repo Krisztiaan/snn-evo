@@ -14,55 +14,6 @@ import jax.numpy as jnp
 from jax import Array
 
 
-class NetworkState(NamedTuple):
-    """Complete neural network state that rules can modify.
-    
-    This is a unified representation that contains all state variables
-    that learning rules might need to read or modify.
-    """
-    # Core neural dynamics
-    v: Array  # Membrane potentials
-    spike: Array  # Current spikes (bool)
-    spike_history: Array  # Recent spike history for STDP
-    refractory: Array  # Refractory periods
-    
-    # Synaptic state
-    w: Array  # Weight matrix
-    w_mask: Array  # Connectivity mask
-    w_plastic_mask: Array  # Plasticity mask
-    syn_current_e: Array  # Excitatory currents
-    syn_current_i: Array  # Inhibitory currents
-    
-    # Plasticity traces
-    trace_pre: Array  # Pre-synaptic trace
-    trace_post: Array  # Post-synaptic trace
-    eligibility_trace: Array  # Eligibility trace matrix
-    
-    # Homeostasis
-    firing_rate: Array  # Running average firing rates
-    threshold_adapt: Array  # Adaptive thresholds
-    target_rate: Array  # Target firing rates
-    
-    # Neuromodulation
-    dopamine: float  # Global dopamine level
-    value_estimate: float  # TD value estimate
-    reward_prediction_error: float  # RPE signal
-    
-    # Structural properties
-    is_excitatory: Array  # Neuron types
-    neuron_types: Array  # Detailed neuron categories
-    
-    # Learning state
-    learning_rate: float  # Current learning rate
-    weight_momentum: Array  # Momentum terms
-    
-    # Additional metadata
-    timestep: int  # Current timestep
-    episode: int  # Current episode
-    
-    # Optional: Input activity (for STDP on input connections)
-    input_spike: Optional[Array] = None  # Input spikes/activity
-    input_trace: Optional[Array] = None  # Input activity trace
 
 
 class RuleContext(NamedTuple):
@@ -116,7 +67,7 @@ class LearningRule(Protocol):
         """Set of state fields this rule modifies."""
         ...
     
-    def apply(self, state: NetworkState, context: RuleContext) -> NetworkState:
+    def apply(self, state: Any, context: RuleContext) -> Any:
         """Apply the learning rule to transform the network state.
         
         Args:
@@ -156,11 +107,11 @@ class AbstractLearningRule(ABC):
         pass
     
     @abstractmethod
-    def apply(self, state: NetworkState, context: RuleContext) -> NetworkState:
+    def apply(self, state: Any, context: RuleContext) -> Any:
         """Apply the learning rule."""
         pass
     
-    def initialize(self, sample_state: NetworkState) -> None:
+    def initialize(self, sample_state: Any) -> None:
         """Initialize rule based on network architecture.
         
         Called once before the rule is used, allowing it to set up
@@ -194,13 +145,13 @@ class ComposedRule(AbstractLearningRule):
         """Union of all sub-rule modifications."""
         return set().union(*(rule.modifies for rule in self.rules))
     
-    def apply(self, state: NetworkState, context: RuleContext) -> NetworkState:
+    def apply(self, state: Any, context: RuleContext) -> Any:
         """Apply all sub-rules in sequence."""
         for rule in self.rules:
             state = rule.apply(state, context)
         return state
     
-    def initialize(self, sample_state: NetworkState) -> None:
+    def initialize(self, sample_state: Any) -> None:
         """Initialize all sub-rules."""
         super().initialize(sample_state)
         for rule in self.rules:

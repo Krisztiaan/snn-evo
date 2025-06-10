@@ -3,7 +3,7 @@
 
 from typing import List, Dict, Any, NamedTuple, Optional
 
-from world.simple_grid_0003.types import WorldConfig
+from interfaces import WorldConfig
 
 
 class NetworkConfig(NamedTuple):

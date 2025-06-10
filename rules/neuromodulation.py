@@ -11,8 +11,9 @@ import jax
 import jax.numpy as jnp
 from jax import Array
 
-from .base import AbstractLearningRule, NetworkState, RuleContext
+from .base import AbstractLearningRule, RuleContext
 from .registry import register_rule
+from models.phase_0_14_neo.state import NeoAgentState
 
 
 @register_rule("dopamine_modulation", category="neuromodulation",
@@ -68,7 +69,7 @@ class DopamineModulationRule(AbstractLearningRule):
     def modifies(self) -> set[str]:
         return {"w", "dopamine"}
     
-    def apply(self, state: NetworkState, context: RuleContext) -> NetworkState:
+    def apply(self, state: NeoAgentState, context: RuleContext) -> NeoAgentState:
         """Apply dopamine-modulated plasticity."""
         dt = context.dt
         
@@ -155,7 +156,7 @@ class EligibilityTraceRule(AbstractLearningRule):
     def modifies(self) -> set[str]:
         return {"eligibility_trace"}
     
-    def apply(self, state: NetworkState, context: RuleContext) -> NetworkState:
+    def apply(self, state: NeoAgentState, context: RuleContext) -> NeoAgentState:
         """Update eligibility traces."""
         dt = context.dt
         
@@ -164,22 +165,15 @@ class EligibilityTraceRule(AbstractLearningRule):
         decayed_eligibility = state.eligibility_trace * decay_factor
         
         # Calculate new eligibility from current activity
-        # Handle input connections similar to STDP
         n_neurons = state.spike.shape[0]
-        n_total_pre = decayed_eligibility.shape[1]
+        n_total_pre = state.eligibility_trace.shape[1]
         n_inputs = n_total_pre - n_neurons
         
         # Create full pre-synaptic traces (inputs + neurons)
-        if state.input_trace is not None and state.input_trace.shape[0] == n_inputs:
-            full_trace_pre = jnp.concatenate([state.input_trace, state.trace_pre])
-        else:
-            full_trace_pre = jnp.concatenate([jnp.zeros(n_inputs), state.trace_pre])
+        full_trace_pre = jnp.concatenate([state.input_buffer, state.trace_pre])
         
         # Create full pre-synaptic spikes
-        if state.input_spike is not None and state.input_spike.shape[0] == n_inputs:
-            full_spike_pre = jnp.concatenate([state.input_spike.astype(jnp.float32), state.spike.astype(jnp.float32)])
-        else:
-            full_spike_pre = jnp.concatenate([jnp.zeros(n_inputs), state.spike.astype(jnp.float32)])
+        full_spike_pre = jnp.concatenate([state.input_buffer > 0.5, state.spike.astype(jnp.float32)])
         
         # Calculate eligibility contributions
         pre_post = jnp.outer(state.spike, full_trace_pre)
@@ -247,7 +241,7 @@ class RewardPredictionRule(AbstractLearningRule):
     def modifies(self) -> set[str]:
         return {"value_estimate", "reward_prediction_error"}
     
-    def apply(self, state: NetworkState, context: RuleContext) -> NetworkState:
+    def apply(self, state: NeoAgentState, context: RuleContext) -> NeoAgentState:
         """Update value estimate and calculate RPE."""
         # Calculate TD error (reward prediction error)
         next_value = state.value_estimate  # Could be from a critic network
@@ -317,7 +311,7 @@ class ThreeFactorRule(AbstractLearningRule):
     def modifies(self) -> set[str]:
         return {"w", "eligibility_trace", "dopamine"}
     
-    def apply(self, state: NetworkState, context: RuleContext) -> NetworkState:
+    def apply(self, state: NeoAgentState, context: RuleContext) -> NeoAgentState:
         """Apply complete three-factor learning."""
         dt = context.dt
         

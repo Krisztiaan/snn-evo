@@ -13,22 +13,14 @@ import jax
 import jax.numpy as jnp
 from jax import Array
 
+from interfaces import ExperimentConfig
+from interfaces.episode_data import StepData
+
 from . import __version__ as EXPORTER_VERSION
 from .schema import SCHEMA_VERSION
 from .utils import NumpyEncoder
 
 
-class ExperimentConfig(NamedTuple):
-    """Immutable experiment configuration."""
-    world_version: str
-    agent_version: str
-    world_params: Dict[str, Any]
-    agent_params: Dict[str, Any]
-    neural_params: Dict[str, Any]
-    learning_params: Dict[str, Any]
-    max_timesteps: int
-    neural_dim: int
-    neural_sampling_rate: int = 100
 
 
 class EpisodeBuffer(NamedTuple):
@@ -56,21 +48,17 @@ def create_episode_buffer(max_timesteps: int, neural_dim: int, episode_id: int) 
 
 
 @jax.jit
-def add_timestep(
+def log_step(
     buffer: EpisodeBuffer,
-    timestep: int,
-    neural_state: Array,
-    reward: float,
-    action: int
+    step_data: StepData
 ) -> EpisodeBuffer:
-    """Add a timestep to the buffer (pure function)."""
+    """Add a timestep's data to the buffer (pure function)."""
     idx = buffer.current_size
-    
     return buffer._replace(
-        timesteps=buffer.timesteps.at[idx].set(timestep),
-        neural_states=buffer.neural_states.at[idx].set(neural_state),
-        rewards=buffer.rewards.at[idx].set(reward),
-        actions=buffer.actions.at[idx].set(action),
+        timesteps=buffer.timesteps.at[idx].set(step_data.timestep),
+        neural_states=buffer.neural_states.at[idx].set(step_data.neural_v),
+        rewards=buffer.rewards.at[idx].set(step_data.reward),
+        actions=buffer.actions.at[idx].set(step_data.action),
         current_size=buffer.current_size + 1
     )
 
@@ -98,7 +86,6 @@ def sample_neural_states(neural_states: Array, sampling_rate: int) -> Array:
     return sampled
 
 
-@jax.jit
 def compute_episode_statistics(buffer: EpisodeBuffer) -> Dict[str, Array]:
     """Compute episode statistics from buffer."""
     size = buffer.current_size
@@ -168,69 +155,61 @@ class JaxDataExporter:
         self.h5_file.attrs["timestamp"] = self.timestamp
         self.h5_file.attrs["schema_version"] = SCHEMA_VERSION
         self.h5_file.attrs["exporter_version"] = EXPORTER_VERSION
-        self.h5_file.attrs["neural_dim"] = self.config.neural_dim
-        self.h5_file.attrs["max_timesteps"] = self.config.max_timesteps
+        self.h5_file.attrs["neural_dim"] = self.config.neural.n_neurons
+        self.h5_file.attrs["max_timesteps"] = self.config.world.max_timesteps
         self.h5_file.attrs["neural_sampling_rate"] = self.config.neural_sampling_rate
         
         # Create groups
         self.episodes_group = self.h5_file.create_group("episodes")
         
         # Save experiment config
-        config_dict = self.config._asdict()
+        config_dict = {
+            "experiment_name": self.config.experiment_name,
+            "agent_version": self.config.agent_version,
+            "world_version": self.config.world_version,
+            "world": self.config.world._asdict(),
+            "neural": self.config.neural._asdict(),
+            "plasticity": self.config.plasticity._asdict(),
+            "behavior": self.config.behavior._asdict(),
+            "n_episodes": self.config.n_episodes,
+            "seed": self.config.seed,
+            "device": self.config.device
+        }
         with open(self.output_dir / "experiment_config.json", "w") as f:
             json.dump(config_dict, f, indent=2, cls=NumpyEncoder)
             
         if self.log_to_console:
             print(f"[{datetime.now().strftime('%H:%M:%S')}] Started experiment: {self.experiment_name}")
     
-    def start_episode(self) -> Tuple[EpisodeBuffer, Callable]:
+    def start_episode(self, episode_id: int) -> Tuple[EpisodeBuffer, Callable]:
         """Start a new episode, returns buffer and log function."""
-        episode_id = self.episode_count
         self.episode_count += 1
         
         # Create buffer on device
         self.current_buffer = create_episode_buffer(
-            self.config.max_timesteps,
-            self.config.neural_dim,
+            self.config.world.max_timesteps,
+            self.config.neural.n_neurons,
             episode_id
         )
         
         self.episode_start_time = time.time()
         
-        # Return buffer and the JIT-compiled add_timestep function
-        return self.current_buffer, add_timestep
+        # Return buffer and the JIT-compiled log_step function
+        return self.current_buffer, log_step
     
     def end_episode(
         self,
-        final_buffer: EpisodeBuffer,
-        success: bool = False,
-        reward_history: Optional[List[float]] = None
-    ) -> Dict[str, Any]:
+        buffer: EpisodeBuffer,
+        world_reward_tracking: Dict[str, Array],
+        success: bool = False
+    ) -> Dict[str, float]:
         """End episode and persist data (I/O operation)."""
-        # Compute statistics on device before transfer (without JIT since buffer is already traced)
-        size = final_buffer.current_size
-        rewards_slice = jax.lax.dynamic_slice(final_buffer.rewards, (0,), (size,))
-        neural_slice = jax.lax.dynamic_slice(final_buffer.neural_states, (0, 0), (size, final_buffer.neural_states.shape[1]))
-        actions_slice = jax.lax.dynamic_slice(final_buffer.actions, (0,), (size,))
+        # --- OPTIMIZATION: Compute stats on device BEFORE transfer ---
+        stats = compute_episode_statistics(buffer)
         
-        # Compute statistics
-        action_counts = jnp.zeros(4).at[actions_slice].add(1)
-        action_probs = action_counts / jnp.sum(action_counts)
-        safe_probs = jnp.where(action_probs > 0, action_probs, 1e-10)
-        action_entropy = -jnp.sum(safe_probs * jnp.log(safe_probs))
-        
-        stats = {
-            "total_reward": jnp.sum(rewards_slice),
-            "mean_neural_activity": jnp.mean(neural_slice),
-            "max_neural_activity": jnp.max(neural_slice),
-            "action_entropy": action_entropy,
-            "episode_length": size,
-            "rewards_collected": jnp.sum(rewards_slice > 0)
-        }
-        
-        # Transfer from device to host
-        host_buffer = jax.device_get(final_buffer)
-        host_stats = jax.device_get(stats)
+        # Transfer only the small stats dict and the buffer from device to host
+        host_buffer, host_stats = jax.device_get((buffer, stats))
+        # --- END OPTIMIZATION ---
         
         # Extract actual data size
         size = host_buffer.current_size
@@ -239,9 +218,9 @@ class JaxDataExporter:
         if self.config.neural_sampling_rate > 1:
             # Use dynamic_slice for extracting relevant data
             neural_slice = jax.lax.dynamic_slice(
-                final_buffer.neural_states, 
+                buffer.neural_states, 
                 (0, 0), 
-                (size, final_buffer.neural_states.shape[1])
+                (size, buffer.neural_states.shape[1])
             )
             sampled_neural = sample_neural_states(
                 neural_slice,
@@ -294,18 +273,20 @@ class JaxDataExporter:
         episode_group.attrs["total_reward"] = float(host_stats["total_reward"])
         episode_group.attrs["rewards_collected"] = int(host_stats["rewards_collected"])
         
-        # Build summary
+        # Build summary - ensure all values are float for protocol compliance
         summary = {
-            "episode_id": host_buffer.episode_id,
-            "success": success,
-            "timesteps": size,
-            "duration_seconds": episode_duration,
-            "steps_per_second": size / episode_duration if episode_duration > 0 else 0,
-            **{k: float(v) if hasattr(v, 'item') else v for k, v in host_stats.items()}
+            "episode_id": float(host_buffer.episode_id),
+            "success": float(success),
+            "timesteps": float(size),
+            "duration_seconds": float(episode_duration),
+            "steps_per_second": float(size / episode_duration if episode_duration > 0 else 0),
+            **{k: float(v) if hasattr(v, 'item') else float(v) for k, v in host_stats.items()}
         }
         
-        if reward_history is not None:
-            summary["reward_history"] = reward_history
+        # Add world reward tracking info if provided
+        if world_reward_tracking:
+            summary["total_rewards"] = float(host_stats["rewards_collected"])
+            # Could add more from world_reward_tracking if needed
             
         self.episode_summaries.append(summary)
         
@@ -359,6 +340,25 @@ class JaxDataExporter:
             print(f"[{datetime.now().strftime('%H:%M:%S')}] Saved network: "
                   f"{n_neurons} neurons, {n_connections} connections")
     
+    def save_experiment_metadata(
+        self,
+        agent_version: str,
+        agent_name: str,
+        agent_description: str,
+        world_version: str
+    ) -> None:
+        """Save experiment metadata."""
+        if self.h5_file:
+            self.h5_file.attrs["agent_version"] = agent_version
+            self.h5_file.attrs["agent_name"] = agent_name
+            self.h5_file.attrs["agent_description"] = agent_description
+            self.h5_file.attrs["world_version"] = world_version
+    
+    def finalize(self) -> None:
+        """Finalize experiment and save summary."""
+        # Summary is saved in end_episode for each episode
+        pass
+    
     def close(self) -> None:
         """Close the exporter and save final summary (I/O operation)."""
         # Save experiment summary
@@ -369,7 +369,13 @@ class JaxDataExporter:
             "timestamp": self.timestamp,
             "total_episodes": self.episode_count,
             "total_duration_seconds": total_duration,
-            "config": self.config._asdict()
+            "config": {
+                "experiment_name": self.config.experiment_name,
+                "agent_version": self.config.agent_version,
+                "world_version": self.config.world_version,
+                "n_episodes": self.config.n_episodes,
+                "seed": self.config.seed
+            }
         }
         
         # Add aggregate statistics

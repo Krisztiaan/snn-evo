@@ -1,7 +1,7 @@
-# keywords: [episode data, standardized format, type safety]
+# keywords: [episode data, standardized format, type safety, step data]
 """Standardized episode data format for agent-exporter interface."""
 
-from typing import NamedTuple, Optional
+from typing import NamedTuple, Optional, Dict
 from jax import Array
 
 class EpisodeData(NamedTuple):
@@ -30,3 +30,14 @@ class EpisodeData(NamedTuple):
     # Performance metrics computed by agent
     total_reward_events: int = 0  # Number of times gradient was 1.0
     exploration_entropy: Optional[float] = None  # Action distribution entropy
+
+
+class StepData(NamedTuple):
+    """Data for a single timestep, passed to the logger."""
+    timestep: int
+    gradient: Array
+    action: Array
+    reward: Array
+    neural_v: Array  # Example: membrane potential
+    # Additional neural data can be added via the neural_data dict
+    neural_data: Dict[str, Array]  # Other neural data to log per-step

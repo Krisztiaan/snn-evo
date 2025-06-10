@@ -1,7 +1,7 @@
 # keywords: [protocol runner, jax episode, high performance, strict types]
 """Protocol-compliant runner for high-performance episode execution."""
 
-from typing import Tuple, Dict, List
+from typing import Tuple, Dict, List, Any
 import time
 import jax
 import jax.numpy as jnp
@@ -14,63 +14,58 @@ from interfaces import (
     WorldProtocol, WorldState, WorldConfig,
     AgentProtocol, ExperimentConfig, ExporterProtocol,
     EpisodeBufferProtocol, LogTimestepFunction,
-    NeuralConfig, PlasticityConfig, AgentBehaviorConfig,
-    EpisodeData
+    NeuralConfig, PlasticityConfig, AgentBehaviorConfig
 )
+from interfaces.episode_data import StepData
+from export.jax_data_exporter import create_episode_buffer
 
 
-@partial(jax.jit, static_argnames=('max_steps',))
+@partial(jax.jit, static_argnames=('world_step_fn', 'agent_step_fn', 'log_fn', 'max_steps'))
 def run_episode_jax(
     world_step_fn: callable,
-    agent_act_fn: callable,
-    log_timestep_fn: LogTimestepFunction,
-    initial_state: WorldState,
+    agent_step_fn: callable,
+    log_fn: callable,
+    initial_w_state: WorldState,
+    initial_a_state: Any,
     initial_buffer: EpisodeBufferProtocol,
-    initial_key: PRNGKey,
-    max_steps: int
-) -> Tuple[WorldState, EpisodeBufferProtocol, Array, Array]:
-    """Run entire episode in JAX with proper logging.
-    
-    Args:
-        world_step_fn: JIT-compiled world.step function
-        agent_act_fn: JIT-compiled agent.act function
-        log_timestep_fn: JIT-compiled logging function from exporter
-        initial_state: Initial world state
-        initial_buffer: Initial episode buffer from exporter
-        initial_key: Initial random key
-        max_steps: Maximum episode steps
-        
-    Returns:
-        final_state: Final world state
-        final_buffer: Final episode buffer with all logged data
-        gradients: Array of gradients for each step
-        actions: Array of actions taken
-    """
-    def step_fn(carry: Tuple, step: int) -> Tuple[Tuple, Tuple[Array, Array]]:
-        state, buffer, key = carry
+    key: PRNGKey,
+    max_steps: int,
+) -> Tuple[WorldState, Any, EpisodeBufferProtocol]:
+    """JIT-compiled function to run an entire episode."""
+
+    def step_fn(carry, step_idx):
+        w_state, a_state, buffer, key = carry
+        last_gradient = w_state.last_gradient  # Assume gradient is part of world state
+
+        # 1. Agent acts
         key, agent_key = split(key)
+        new_a_state, action, neural_data = agent_step_fn(a_state, last_gradient, agent_key)
+
+        # 2. World steps forward
+        new_w_state, new_gradient = world_step_fn(w_state, action)
         
-        # Get current gradient from state
-        # Note: In first step, we should have initial gradient
-        gradient = state.reward_positions  # This is wrong - need gradient calculation
-        
-        # Agent selects action
-        action = agent_act_fn(gradient, agent_key)
-        
-        # World steps
-        new_state, new_gradient = world_step_fn(state, action)
-        
-        # Log timestep
-        new_buffer = log_timestep_fn(buffer, step, new_gradient, action, None)
-        
-        return (new_state, new_buffer, key), (new_gradient, action)
-    
-    # Run all steps
-    (final_state, final_buffer, _), (gradients, actions) = lax.scan(
-        step_fn, (initial_state, initial_buffer, initial_key), jnp.arange(max_steps)
+        # 3. Log the results of the state transition
+        reward = jnp.where(last_gradient >= 0.99, 1.0, 0.0)
+        step_data = StepData(
+            timestep=step_idx,
+            gradient=last_gradient,
+            action=action,
+            reward=reward,
+            neural_v=neural_data.get('v', jnp.zeros(1)),  # Default to zeros if not present
+            neural_data=neural_data
+        )
+        new_buffer = log_fn(buffer, step_data)
+
+        return (new_w_state, new_a_state, new_buffer, key), None
+
+    # Initial state for the scan loop
+    init_carry = (initial_w_state, initial_a_state, initial_buffer, key)
+
+    (final_w_state, final_a_state, final_buffer, _), _ = lax.scan(
+        step_fn, init_carry, jnp.arange(max_steps)
     )
-    
-    return final_state, final_buffer, gradients, actions
+
+    return final_w_state, final_a_state, final_buffer
 
 
 class ProtocolRunner:
@@ -88,60 +83,78 @@ class ProtocolRunner:
         self.exporter = exporter
         self.config = config
     
-    def run_episode(self, episode_id: int, episode_key: PRNGKey) -> Dict[str, float]:
-        """Run single episode with protocol-compliant components."""
-        # Start episode in exporter
-        buffer, log_fn = self.exporter.start_episode(episode_id)
+    def run_episode(self, episode_id: int, episode_key: PRNGKey, use_jit: bool = True) -> Dict[str, float]:
+        """Runs a single episode, using JIT by default.
         
-        # Reset world and agent
-        world_key, agent_key = split(episode_key)
-        world_state, initial_gradient = self.world.reset(world_key)
-        self.agent.reset(agent_key)
-        
+        Args:
+            episode_id: Unique episode identifier
+            episode_key: JAX random key for this episode
+            use_jit: Whether to use JIT compilation (default: True)
+            
+        Returns:
+            Dictionary of episode statistics
+        """
         start_time = time.perf_counter()
         
-        # Episode execution
-        gradients_list: List[float] = []
-        actions_list: List[int] = []
-        
-        gradient = initial_gradient
-        for step in range(self.config.world.max_timesteps):
-            # Agent acts
-            agent_key, step_key = split(agent_key)
-            action = self.agent.act(gradient, step_key)
-            
-            # Convert action to int for logging (JAX returns Array)
-            action_int = int(action)
-            
-            # Log timestep
-            buffer = log_fn(buffer, step, gradient, action_int, None)
-            
-            # Store for tracking
-            gradients_list.append(float(gradient))
-            actions_list.append(action_int)
-            
-            # World steps
-            world_state, gradient = self.world.step(world_state, action)
-        
-        # Get episode data from agent
-        episode_data = self.agent.get_episode_data()
-        
-        # Get reward tracking from world
-        reward_tracking = self.world.get_reward_tracking(world_state)
-        
-        # End episode
-        stats = self.exporter.end_episode(
-            buffer,
-            episode_data,
-            reward_tracking,
-            success=episode_data.total_reward_events == self.config.world.n_rewards
-        )
-        
+        # Setup
+        world_key, agent_key, run_key = split(episode_key, 3)
+        world_state, initial_gradient = self.world.reset(world_key)
+        agent_state = self.agent.reset(agent_key)
+        buffer, log_fn = self.exporter.start_episode(episode_id)
+
+        if use_jit:
+            # High-performance path
+            final_w_state, final_a_state, final_buffer = run_episode_jax(
+                self.world.step,
+                self.agent.step,  # Use the pure protocol step method
+                log_fn,
+                world_state, agent_state, buffer, run_key,
+                self.config.world.max_timesteps
+            )
+            self.agent.state = final_a_state  # Update host-side state
+        else:
+            # Simple loop for debugging
+            gradient = world_state.last_gradient
+            agent_state_local = agent_state
+            for step in range(self.config.world.max_timesteps):
+                agent_key, step_key = split(agent_key)
+                new_agent_state, action, neural_data = self.agent.step(agent_state_local, gradient, step_key)
+                reward = jnp.where(gradient >= 0.99, 1.0, 0.0)
+                step_data = StepData(
+                    timestep=step,
+                    gradient=gradient,
+                    action=action,
+                    reward=reward,
+                    neural_v=neural_data.get('v', jnp.zeros(1)),
+                    neural_data=neural_data
+                )
+                buffer = log_fn(buffer, step_data)
+                world_state, gradient = self.world.step(world_state, action)
+                agent_state_local = new_agent_state
+            final_w_state, final_buffer = world_state, buffer
+            self.agent.state = agent_state_local
+
+        # Finalization
         duration = time.perf_counter() - start_time
+        
+        # The agent no longer provides episode_data. The exporter
+        # gets everything it needs from the buffer.
+        reward_tracking = self.world.get_reward_tracking(final_w_state)
+        
+        # Calculate success based on the final buffer's reward count
+        rewards_collected = jnp.sum(final_buffer.rewards[:final_buffer.current_size])
+        success = rewards_collected >= self.config.world.n_rewards
+        
+        stats = self.exporter.end_episode(
+            final_buffer, 
+            reward_tracking,
+            success=success
+        )
         stats["duration_seconds"] = duration
-        stats["steps_per_second"] = self.config.world.max_timesteps / duration
+        stats["steps_per_second"] = self.config.world.max_timesteps / duration if duration > 0 else 0
         
         return stats
+    
     
     def run_experiment(self) -> Dict[str, List[Dict[str, float]]]:
         """Run full experiment."""
@@ -185,6 +198,158 @@ class ProtocolRunner:
             "episode_stats": episode_stats,
             "average_steps_per_second": avg_speed,
             "average_rewards": avg_rewards
+        }
+    
+    def run_experiment_vmap(self, num_parallel_episodes: int = 10) -> Dict[str, Any]:
+        """Run experiment with batched episodes using vmap for parallelism.
+        
+        Args:
+            num_parallel_episodes: Number of episodes to run in parallel
+            
+        Returns:
+            Experiment statistics including throughput metrics
+        """
+        print(f"Running {self.config.n_episodes} episodes with batch size {num_parallel_episodes}...")
+        
+        # Save metadata
+        world_config = self.world.get_config()
+        self.exporter.save_experiment_metadata(
+            agent_version=self.agent.VERSION,
+            agent_name=self.agent.MODEL_NAME,
+            agent_description=self.agent.DESCRIPTION,
+            world_version=world_config["version"]
+        )
+        
+        # Track overall statistics
+        all_episode_stats = []
+        key = PRNGKey(self.config.seed)
+        
+        # Process episodes in batches
+        num_batches = (self.config.n_episodes + num_parallel_episodes - 1) // num_parallel_episodes
+        
+        for batch_idx in range(num_batches):
+            batch_start_time = time.perf_counter()
+            
+            # Calculate actual batch size (might be smaller for last batch)
+            remaining_episodes = self.config.n_episodes - batch_idx * num_parallel_episodes
+            current_batch_size = min(num_parallel_episodes, remaining_episodes)
+            
+            # 1. Create a batch of random keys
+            key, batch_key = split(key)
+            world_keys = split(batch_key, current_batch_size * 3)
+            world_reset_keys = world_keys[:current_batch_size]
+            agent_reset_keys = world_keys[current_batch_size:2*current_batch_size]
+            run_keys = world_keys[2*current_batch_size:]
+            
+            # 2. Create batched initial states
+            # vmap over reset functions
+            batched_world_reset = jax.vmap(self.world.reset)
+            batched_agent_reset = jax.vmap(self.agent.reset)
+            
+            batched_world_states, batched_gradients = batched_world_reset(world_reset_keys)
+            batched_agent_states = batched_agent_reset(agent_reset_keys)
+            
+            # 3. Create batched initial buffers
+            # This requires a vmap-compatible buffer creation
+            vmap_create_buffer = jax.vmap(
+                lambda eid: create_episode_buffer(
+                    self.config.world.max_timesteps,
+                    self.config.neural.n_neurons,
+                    eid
+                ),
+                in_axes=0
+            )
+            episode_ids = jnp.arange(batch_idx * num_parallel_episodes, 
+                                   batch_idx * num_parallel_episodes + current_batch_size)
+            batched_buffers = vmap_create_buffer(episode_ids)
+            
+            # 4. Get log function (same for all episodes)
+            log_fn = self.exporter.log_step
+            
+            # 5. vmap the main episode runner
+            vmapped_runner = jax.vmap(
+                run_episode_jax,
+                # Map over the first axis of states, buffers, and keys
+                # None means don't map (use same value for all)
+                in_axes=(None, None, None, 0, 0, 0, 0, None)
+            )
+            
+            # 6. Run all episodes in parallel
+            final_w_states, final_a_states, final_buffers = vmapped_runner(
+                self.world.step,
+                self.agent.step,
+                log_fn,
+                batched_world_states,
+                batched_agent_states,
+                batched_buffers,
+                run_keys,
+                self.config.world.max_timesteps
+            )
+            
+            # 7. Process results (device to host transfer)
+            batch_duration = time.perf_counter() - batch_start_time
+            
+            # Transfer to host
+            final_states_host = jax.device_get((final_w_states, final_a_states, final_buffers))
+            final_w_states_host, final_a_states_host, final_buffers_host = final_states_host
+            
+            # Process each episode in the batch
+            for i in range(current_batch_size):
+                # Extract single episode data using tree_map
+                single_buffer = jax.tree_util.tree_map(lambda x: x[i], final_buffers_host)
+                single_w_state = jax.tree_util.tree_map(lambda x: x[i], final_w_states_host)
+                
+                # Get reward tracking from world
+                reward_tracking = self.world.get_reward_tracking(single_w_state)
+                
+                # Calculate success based on the final buffer's reward count
+                rewards_collected = jnp.sum(single_buffer.rewards[:single_buffer.current_size])
+                success = rewards_collected >= self.config.world.n_rewards
+                
+                # End episode in exporter
+                episode_id = batch_idx * num_parallel_episodes + i
+                stats = self.exporter.end_episode(
+                    single_buffer,
+                    reward_tracking,
+                    success=success
+                )
+                
+                # Add batch timing info
+                stats["batch_idx"] = batch_idx
+                stats["batch_size"] = current_batch_size
+                stats["duration_seconds"] = batch_duration / current_batch_size  # Per-episode time
+                stats["steps_per_second"] = self.config.world.max_timesteps / stats["duration_seconds"]
+                
+                all_episode_stats.append(stats)
+            
+            # Log batch progress
+            if self.config.log_to_console:
+                batch_steps_per_sec = (current_batch_size * self.config.world.max_timesteps) / batch_duration
+                print(f"Batch {batch_idx + 1}/{num_batches}: {batch_steps_per_sec:.0f} steps/s total, "
+                      f"{current_batch_size} episodes in {batch_duration:.2f}s")
+        
+        # Finalize experiment
+        self.exporter.finalize()
+        
+        # Calculate summary statistics
+        speeds = [s["steps_per_second"] for s in all_episode_stats]
+        rewards = [s["total_rewards"] for s in all_episode_stats]
+        avg_speed = sum(speeds) / len(speeds)
+        avg_rewards = sum(rewards) / len(rewards)
+        
+        if self.config.log_to_console:
+            print(f"\nVMAP Experiment Summary:")
+            print(f"  Total episodes: {self.config.n_episodes}")
+            print(f"  Batch size: {num_parallel_episodes}")
+            print(f"  Average speed: {avg_speed:.0f} steps/s per episode")
+            print(f"  Average rewards: {avg_rewards:.1f}")
+        
+        return {
+            "episode_stats": all_episode_stats,
+            "average_steps_per_second": avg_speed,
+            "average_rewards": avg_rewards,
+            "batch_size": num_parallel_episodes,
+            "num_batches": num_batches
         }
 
 

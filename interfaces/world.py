@@ -35,6 +35,9 @@ class WorldState(NamedTuple):
     reward_history_spawn_steps: Array  # Shape: (max_history,)
     reward_history_collect_steps: Array  # Shape: (max_history,)
     reward_history_count: Array  # Scalar: number of entries in history
+    
+    # Last gradient computed (for episode loop)
+    last_gradient: Array  # Scalar: float32 in [0, 1]
 
 
 @runtime_checkable

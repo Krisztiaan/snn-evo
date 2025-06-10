@@ -76,7 +76,10 @@ class MinimalGridWorld:
             jnp.exp(-jnp.sqrt(min_dist_sq) / gradient_scale)
         )
         
-        return new_state, gradient
+        # Update last_gradient in state
+        final_state = new_state._replace(last_gradient=gradient)
+        
+        return final_state, gradient
     
     @staticmethod
     @jax.jit
@@ -154,6 +157,9 @@ class MinimalGridWorld:
         history_spawn_steps = history_spawn_steps.at[:self.n_rewards].set(0)
         history_collect_steps = jnp.full(self.max_history, -1, dtype=jnp.int32)
         
+        # Calculate initial gradient
+        initial_gradient = self._calculate_gradient_static(agent_pos, reward_positions, jnp.ones(self.n_rewards, dtype=bool), self.gradient_scale)
+        
         state = WorldState(
             agent_pos=agent_pos,
             agent_dir=agent_dir,
@@ -163,13 +169,11 @@ class MinimalGridWorld:
             reward_history_positions=history_positions,
             reward_history_spawn_steps=history_spawn_steps,
             reward_history_collect_steps=history_collect_steps,
-            reward_history_count=jnp.array(self.n_rewards, dtype=jnp.int32)
+            reward_history_count=jnp.array(self.n_rewards, dtype=jnp.int32),
+            last_gradient=initial_gradient
         )
         
-        # Calculate initial gradient
-        gradient = self._calculate_gradient_static(agent_pos, reward_positions, state.reward_active, self.gradient_scale)
-        
-        return state, gradient
+        return state, initial_gradient
     
     def step(self, state: WorldState, action: int) -> Tuple[WorldState, Array]:
         """Execute action and return new state and gradient observation."""

@@ -18,7 +18,9 @@ class NeoAgentState(NamedTuple):
     refractory: jnp.ndarray  # Refractory period counter
     
     # Synaptic state
-    w: jnp.ndarray  # Weight matrix
+    w: jnp.ndarray  # Weight matrix (for compatibility/learning rules)
+    w_exc: jnp.ndarray  # Pre-separated excitatory weights
+    w_inh: jnp.ndarray  # Pre-separated inhibitory weights
     w_mask: jnp.ndarray  # Connectivity mask
     w_plastic_mask: jnp.ndarray  # Plasticity mask
     syn_current_e: jnp.ndarray  # Excitatory synaptic current
@@ -114,31 +116,35 @@ def create_initial_state(
     read_start = proc_end
     p2r_mask = random.uniform(keys[4], (network_config.num_readout, network_config.num_processing)) < network_config.p_processing_readout
     w_mask = w_mask.at[read_start:, recurrent_offset+proc_start:recurrent_offset+proc_end].set(p2r_mask)
+
+    # --- Vectorized Processing recurrent connections (E-E, E-I, I-E, I-I) ---
+    proc_indices = jnp.arange(proc_start, proc_end)
+    is_proc_exc = is_excitatory[proc_indices]
+
+    # Create masks for pre- and post-synaptic types
+    pre_is_exc = is_proc_exc[None, :]  # Shape (1, n_processing)
+    post_is_exc = is_proc_exc[:, None] # Shape (n_processing, 1)
+
+    # Create probability matrix based on connection types
+    p_matrix = jnp.zeros((network_config.num_processing, network_config.num_processing))
+    p_matrix = jnp.where(post_is_exc & pre_is_exc,   network_config.p_ee, p_matrix) # E -> E
+    p_matrix = jnp.where(post_is_exc & ~pre_is_exc,  network_config.p_ie, p_matrix) # I -> E
+    p_matrix = jnp.where(~post_is_exc & pre_is_exc,  network_config.p_ei, p_matrix) # E -> I
+    p_matrix = jnp.where(~post_is_exc & ~pre_is_exc, network_config.p_ii, p_matrix) # I -> I
+
+    # Generate random numbers and create the mask
+    proc_recurrent_mask = random.uniform(keys[5], p_matrix.shape) < p_matrix
     
-    # Processing recurrent connections (E-E, E-I, I-E, I-I)
-    proc_exc = is_excitatory[proc_start:proc_end]
-    proc_inh = ~proc_exc
-    
-    for i in range(network_config.num_processing):
-        for j in range(network_config.num_processing):
-            if i == j:  # No self-connections
-                continue
-            
-            i_global = proc_start + i
-            j_global = proc_start + j
-            
-            # Determine connection probability based on types
-            if proc_exc[i] and proc_exc[j]:
-                p = network_config.p_ee
-            elif proc_exc[i] and proc_inh[j]:
-                p = network_config.p_ei
-            elif proc_inh[i] and proc_exc[j]:
-                p = network_config.p_ie
-            else:  # I-I
-                p = network_config.p_ii
-            
-            if random.uniform(keys[5], ()) < p:
-                w_mask = w_mask.at[i_global, recurrent_offset + j_global].set(True)
+    # Prevent self-connections
+    diag_indices = jnp.arange(network_config.num_processing)
+    proc_recurrent_mask = proc_recurrent_mask.at[diag_indices, diag_indices].set(False)
+
+    # Apply this mask to the global weight mask
+    w_mask = w_mask.at[
+        proc_start:proc_end, 
+        recurrent_offset+proc_start:recurrent_offset+proc_end
+    ].set(proc_recurrent_mask)
+    # --- End of vectorization ---
     
     # Initialize recurrent weights
     recurrent_weights = random.normal(keys[6], (n_total, n_total)) * 0.1
@@ -165,6 +171,21 @@ def create_initial_state(
     # Initialize neural dynamics
     v_init = jnp.full(n_total, dynamics_config.v_rest)
     
+    # Pre-compute excitatory and inhibitory weight matrices
+    # Create masks for excitatory/inhibitory neurons (including input channels)
+    is_exc_full = jnp.concatenate([
+        jnp.ones(n_input, dtype=bool),  # Input channels are excitatory
+        is_excitatory
+    ])
+    
+    # Create masks for selecting only excitatory or inhibitory weights
+    exc_pre_mask = is_exc_full[None, :]  # Shape: (1, n_total + n_input)
+    inh_pre_mask = ~is_exc_full[None, :]  # Shape: (1, n_total + n_input)
+    
+    # Apply masks to create separated weight matrices
+    w_exc = jnp.where(exc_pre_mask, w, 0.0)
+    w_inh = jnp.where(inh_pre_mask, w, 0.0)
+    
     return NeoAgentState(
         # Core dynamics
         v=v_init,
@@ -173,6 +194,8 @@ def create_initial_state(
         
         # Synaptic
         w=w,
+        w_exc=w_exc,
+        w_inh=w_inh,
         w_mask=w_mask,
         w_plastic_mask=w_plastic_mask,
         syn_current_e=jnp.zeros(n_total),
@@ -209,3 +232,30 @@ def create_initial_state(
         episodes_completed=0,
         last_reward_count=0
     )
+
+
+@jax.jit
+def update_weight_matrices(state: NeoAgentState) -> NeoAgentState:
+    """Update w_exc and w_inh based on the current w matrix.
+    
+    This function should be called after any learning rule modifies w
+    to maintain consistency between the weight representations.
+    """
+    # Get the number of input channels
+    n_input = state.input_buffer.shape[0]
+    
+    # Create masks for excitatory/inhibitory neurons (including input channels)
+    is_exc_full = jnp.concatenate([
+        jnp.ones(n_input, dtype=bool),  # Input channels are excitatory
+        state.is_excitatory
+    ])
+    
+    # Create masks for selecting only excitatory or inhibitory weights
+    exc_pre_mask = is_exc_full[None, :]  # Shape: (1, n_total + n_input)
+    inh_pre_mask = ~is_exc_full[None, :]  # Shape: (1, n_total + n_input)
+    
+    # Apply masks to create separated weight matrices
+    w_exc = jnp.where(exc_pre_mask, state.w, 0.0)
+    w_inh = jnp.where(inh_pre_mask, state.w, 0.0)
+    
+    return state._replace(w_exc=w_exc, w_inh=w_inh)

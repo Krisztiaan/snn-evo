@@ -1,0 +1,24 @@
+{
+  "world": {
+    "grid_size": 100,
+    "n_rewards": 300,
+    "max_timesteps": 20000
+  },
+  "neural": {
+    "n_neurons": 1000,
+    "n_excitatory": 800,
+    "n_inhibitory": 200,
+    "n_sensory": 40,
+    "n_motor": 9,
+    "tau_membrane": 10.0
+  },
+  "plasticity": {
+    "enable_stdp": true,
+    "enable_homeostasis": true,
+    "enable_reward_modulation": true
+  },
+  "behavior": {
+    "action_noise": 0.01,
+    "temperature": 1.0
+  }
+}

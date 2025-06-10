@@ -14,11 +14,11 @@ import jax.numpy as jnp
 from jax import Array, jit
 from jax.random import PRNGKey, split
 
-from interfaces import AgentProtocol, ExperimentConfig, ExporterProtocol, EpisodeData
-from rules import NetworkState, RuleContext, create_rule_pipeline
+from interfaces import AgentProtocol, ExperimentConfig, ExporterProtocol
+from rules import RuleContext, create_rule_pipeline
 
-from .config import NeoConfig, InputConfig, DynamicsConfig, NetworkConfig
-from .state import NeoAgentState, create_initial_state
+from .config import InputConfig, DynamicsConfig, NetworkConfig, LearningRulesConfig
+from .state import NeoAgentState, create_initial_state, update_weight_matrices
 from .dynamics import neuron_dynamics_step, decode_action, encode_input
 
 
@@ -32,20 +32,57 @@ class NeoAgent:
     
     def __init__(self, config: ExperimentConfig, exporter: ExporterProtocol):
         """Initialize agent with configuration and exporter."""
-        # Convert ExperimentConfig to NeoConfig if needed
-        if isinstance(config, NeoConfig):
-            self.neo_config = config
-        else:
-            # Create NeoConfig from ExperimentConfig
-            self.neo_config = self._create_neo_config(config)
-        
-        self.network_config = self.neo_config.network_config
-        self.dynamics_config = self.neo_config.dynamics_config
-        self.input_config = self.neo_config.input_config
-        self.learning_config = self.neo_config.learning_rules_config
-        
         self.config = config
         self.exporter = exporter
+        
+        # Create component configs directly from ExperimentConfig
+        # Calculate total processing neurons
+        total_neurons = config.neural.n_excitatory + config.neural.n_inhibitory
+        processing_neurons = total_neurons - config.neural.n_sensory - config.neural.n_motor
+        
+        self.network_config = NetworkConfig(
+            num_sensory=config.neural.n_sensory,
+            num_processing=processing_neurons,
+            num_readout=config.neural.n_motor,
+            num_input_channels=4,  # 4 gradient directions
+            excitatory_ratio=config.neural.n_excitatory / total_neurons
+        )
+        
+        self.dynamics_config = DynamicsConfig(
+            tau_v=config.neural.tau_membrane,
+            tau_syn_e=config.neural.tau_syn_e,
+            tau_syn_i=config.neural.tau_syn_i,
+            v_rest=-70.0,
+            v_threshold=-50.0,
+            v_reset=-75.0,
+            refractory_time=2.0,
+            initial_temperature=config.behavior.temperature,
+            final_temperature=0.1,
+            temperature_decay=0.995
+        )
+        
+        self.input_config = InputConfig(
+            input_gain=15.0,
+            input_tuning_width=0.15,
+            input_noise=config.behavior.action_noise
+        )
+        
+        # Learning config with enabled rules based on plasticity settings
+        enabled_rules = []
+        if config.plasticity.enable_stdp:
+            enabled_rules.extend(["stdp", "eligibility_trace"])
+        if config.plasticity.enable_homeostasis:
+            enabled_rules.append("homeostatic")
+        if config.plasticity.enable_reward_modulation:
+            enabled_rules.append("dopamine_modulation")
+            
+        self.learning_config = LearningRulesConfig(
+            enabled_rules=enabled_rules,
+            rule_params={},
+            base_learning_rate=0.001,
+            learning_rate_decay=0.999,
+            min_learning_rate=0.0001
+        )
         
         # Initialize rule pipeline
         print(f"Creating rule pipeline with rules: {self.learning_config.enabled_rules}")
@@ -58,13 +95,12 @@ class NeoAgent:
         # Agent state (will be initialized in reset)
         self.state: Optional[NeoAgentState] = None
         self.initial_state: Optional[NeoAgentState] = None
-        
-        # Episode data collection (pure JAX arrays)
-        self.max_timesteps = config.world_params.get("max_timesteps", 10000)
-        self.episode_buffer = self._create_episode_buffer()
         self.timestep = 0
+        
+        # Create JIT-compiled step function with configs closed over
+        self.step = self._create_step_function()
     
-    def reset(self, key: PRNGKey) -> None:
+    def reset(self, key: PRNGKey) -> NeoAgentState:
         """Reset agent's internal state for new episode."""
         # Initialize state if first time
         if self.initial_state is None:
@@ -76,8 +112,7 @@ class NeoAgent:
             )
             
             # Initialize rule pipeline with initial state
-            network_state = self._agent_state_to_network_state(self.initial_state)
-            self.rule_pipeline.initialize(network_state)
+            self.rule_pipeline.initialize(self.initial_state)
             
             # Save network structure
             self._export_network_structure()
@@ -88,80 +123,70 @@ class NeoAgent:
         else:
             self.state = self._reset_episode_jit(
                 self.state,
-                self.learning_config,
-                self.dynamics_config,
-                self.network_config
+                self.learning_config.base_learning_rate,
+                self.learning_config.learning_rate_decay,
+                self.learning_config.min_learning_rate,
+                self.dynamics_config.temperature_decay,
+                self.dynamics_config.final_temperature,
+                self.dynamics_config.v_rest
             )
         
-        # Reset episode tracking
-        self.episode_buffer = self._create_episode_buffer()
+        # Reset timestep
         self.timestep = 0
+        
+        return self.state
     
-    def act(self, gradient: Array, key: PRNGKey) -> Array:
-        """Select action based on gradient observation - Pure JAX."""
-        # Run step computation
-        new_state, action, neural_data = self._step_jit(
-            self.state,
-            gradient,
-            key,
-            self.timestep,
-            self.input_config,
-            self.dynamics_config,
-            self.network_config,
-            self.rule_pipeline
-        )
+    def _create_step_function(self):
+        """Create a JIT-compiled step function with configs closed over."""
+        # Capture configs and pipeline in closure
+        input_config = self.input_config
+        dynamics_config = self.dynamics_config
+        network_config = self.network_config
+        rule_pipeline = self.rule_pipeline
         
-        # Update episode buffer
-        self.episode_buffer = NeoAgent._update_buffer(
-            self.episode_buffer,
-            self.timestep,
-            gradient,
-            action,
-            neural_data
-        )
+        @jit
+        def step_wrapper(state: NeoAgentState, gradient: Array, key: PRNGKey) -> Tuple[Array, NeoAgentState, Dict[str, Array]]:
+            """Pure JAX step function for the runner."""
+            # Use the agent's current timestep from state
+            timestep = state.timestep
+            
+            # Call the original step function with all parameters
+            new_state, action, neural_data = NeoAgent.step_impl(
+                state,
+                gradient,
+                key,
+                timestep,
+                input_config,
+                dynamics_config,
+                network_config,
+                rule_pipeline
+            )
+            
+            return new_state, action, neural_data
         
-        # Update internal state
+        return step_wrapper
+    
+    def act(self, gradient: Array, key: PRNGKey) -> Tuple[Array, Any, Dict[str, Array]]:
+        """Select action and update host-side state for non-JIT execution.
+        
+        Returns:
+            action: The selected action
+            state: Updated agent state (for interface compatibility)
+            neural_data: Neural data for logging
+        """
+        # Call the pure JIT function with the current host state
+        new_state, action, neural_data = self.step(self.state, gradient, key)
+        
+        # Update the host-side state
         self.state = new_state
-        self.timestep += 1
+        self.timestep = new_state.timestep
         
-        return action
+        return action, self.state, neural_data
     
-    def get_episode_data(self) -> EpisodeData:
-        """Get standardized episode data for logging."""
-        # Extract data up to current timestep
-        gradients = self.episode_buffer["gradients"][:self.timestep]
-        actions = self.episode_buffer["actions"][:self.timestep]
-        
-        # Compute rewards (gradient == 1.0 means reward)
-        rewards = jnp.where(gradients >= 0.99, 1.0, 0.0)
-        
-        # Neural data
-        neural_data = {
-            "membrane_potential": self.episode_buffer["membrane_potential"][:self.timestep],
-            "spikes": self.episode_buffer["spikes"][:self.timestep],
-            "firing_rates": self.episode_buffer["firing_rates"][:self.timestep]
-        }
-        
-        # Learning data
-        learning_data = {
-            "final_weights": self.state.w,
-            "weight_changes": self.state.w - self.initial_state.w,
-            "final_learning_rate": self.state.learning_rate,
-            "dopamine_trace": self.state.dopamine,
-            "eligibility_trace": self.state.eligibility_trace
-        }
-        
-        return EpisodeData(
-            gradients=gradients,
-            actions=actions,
-            rewards=rewards,
-            neural_data=neural_data,
-            learning_data=learning_data
-        )
     
     @staticmethod
     @partial(jit, static_argnums=(4, 5, 6, 7))
-    def _step_jit(
+    def step_impl(
         state: NeoAgentState,
         gradient: Array,
         key: PRNGKey,
@@ -193,22 +218,29 @@ class NeoAgent:
         # Check if reward received (gradient near 1.0)
         reward_received = gradient >= 0.99
         
-        network_state = NeoAgent._agent_state_to_network_state_static(state)
+        # --- Optimization: Compute expensive values once ---
+        current_spikes = state.spike.astype(jnp.float32)
+        total_spike_count = jnp.sum(current_spikes)
+        n_neurons = state.v.shape[0]
+        
         context = RuleContext(
             reward=reward_received.astype(jnp.float32),
             observation=gradient,
             action=action,
-            spike_count=jnp.sum(state.spike),
-            population_rate=jnp.mean(state.spike.astype(jnp.float32)),
-            pre_spike_sum=jnp.sum(state.spike),
-            post_spike_sum=jnp.sum(state.spike),
+            spike_count=total_spike_count,  # Use pre-computed
+            population_rate=total_spike_count / n_neurons,  # Use pre-computed
+            pre_spike_sum=total_spike_count,  # Use pre-computed
+            post_spike_sum=total_spike_count,  # Use pre-computed
             dt=1.0,
             episode_progress=timestep / 10000.0,  # Approximate max timesteps
             params={"learning_rate": state.learning_rate}
         )
         
-        updated_network_state = rule_pipeline.apply(network_state, context)
-        state = NeoAgent._network_state_to_agent_state_static(updated_network_state, state)
+        # Pass the agent state directly to the pipeline
+        state = rule_pipeline.apply(state, context)
+        
+        # Update separated weight matrices after learning
+        state = update_weight_matrices(state)
         
         # 5. Update state metadata
         state = state._replace(
@@ -226,33 +258,39 @@ class NeoAgent:
         return state, action, neural_data
     
     @staticmethod
-    @partial(jit, static_argnums=(1, 2, 3))
+    @jit
     def _reset_episode_jit(
         state: NeoAgentState,
-        learning_config: Any,
-        dynamics_config: DynamicsConfig,
-        network_config: NetworkConfig
+        base_learning_rate: float,
+        learning_rate_decay: float,
+        min_learning_rate: float,
+        temperature_decay: float,
+        final_temperature: float,
+        v_rest: float
     ) -> NeoAgentState:
         """Soft reset for new episode - JIT compiled."""
         n_neurons = state.v.shape[0]
         
         # Update learning rate
         new_lr = jnp.maximum(
-            learning_config.base_learning_rate * (
-                learning_config.learning_rate_decay ** state.episodes_completed
+            base_learning_rate * (
+                learning_rate_decay ** state.episodes_completed
             ),
-            learning_config.min_learning_rate
+            min_learning_rate
         )
         
         # Update temperature
         new_temp = jnp.maximum(
-            state.action_temperature * dynamics_config.temperature_decay,
-            dynamics_config.final_temperature
+            state.action_temperature * temperature_decay,
+            final_temperature
         )
+        
+        # Get input buffer size from existing state
+        input_buffer_size = state.input_buffer.shape[0]
         
         return state._replace(
             # Reset dynamics
-            v=jnp.full(n_neurons, dynamics_config.v_rest),
+            v=jnp.full(n_neurons, v_rest),
             spike=jnp.zeros(n_neurons, dtype=bool),
             refractory=jnp.zeros(n_neurons),
             syn_current_e=jnp.zeros(n_neurons),
@@ -273,7 +311,7 @@ class NeoAgent:
             
             # Reset motor
             motor_trace=jnp.zeros(4),
-            input_buffer=jnp.zeros(network_config.num_input_channels),
+            input_buffer=jnp.zeros(input_buffer_size),
             
             # Update meta
             learning_rate=new_lr,
@@ -283,111 +321,7 @@ class NeoAgent:
             episodes_completed=state.episodes_completed + 1
         )
     
-    def _create_episode_buffer(self) -> Dict[str, Array]:
-        """Create pre-allocated episode buffer."""
-        n_neurons = self._get_network_size()
-        return {
-            "gradients": jnp.zeros(self.max_timesteps),
-            "actions": jnp.zeros(self.max_timesteps, dtype=jnp.int32),
-            "membrane_potential": jnp.zeros((self.max_timesteps, n_neurons)),
-            "spikes": jnp.zeros((self.max_timesteps, n_neurons), dtype=bool),
-            "firing_rates": jnp.zeros((self.max_timesteps, n_neurons))
-        }
     
-    @staticmethod
-    @jit
-    def _update_buffer(
-        buffer: Dict[str, Array],
-        timestep: int,
-        gradient: Array,
-        action: Array,
-        neural_data: Dict[str, Array]
-    ) -> Dict[str, Array]:
-        """Update episode buffer - JIT compiled."""
-        return {
-            "gradients": buffer["gradients"].at[timestep].set(gradient),
-            "actions": buffer["actions"].at[timestep].set(action),
-            "membrane_potential": buffer["membrane_potential"].at[timestep].set(neural_data["v"]),
-            "spikes": buffer["spikes"].at[timestep].set(neural_data["spikes"]),
-            "firing_rates": buffer["firing_rates"].at[timestep].set(neural_data["firing_rate"])
-        }
-    
-    @staticmethod
-    def _agent_state_to_network_state_static(state: NeoAgentState) -> NetworkState:
-        """Convert agent state to network state - static for JIT."""
-        # Create spike history
-        spike_history = jnp.stack([
-            state.spike.astype(jnp.float32),
-            state.spike.astype(jnp.float32),
-            state.spike.astype(jnp.float32),
-        ])
-        
-        # Convert input buffer to spikes (threshold at 0.5)
-        input_spikes = state.input_buffer > 0.5
-        
-        return NetworkState(
-            v=state.v,
-            spike=state.spike,
-            spike_history=spike_history,
-            refractory=state.refractory,
-            w=state.w,
-            w_mask=state.w_mask,
-            w_plastic_mask=state.w_plastic_mask,
-            syn_current_e=state.syn_current_e,
-            syn_current_i=state.syn_current_i,
-            trace_pre=state.trace_pre,
-            trace_post=state.trace_post,
-            eligibility_trace=state.eligibility_trace,
-            firing_rate=state.firing_rate,
-            threshold_adapt=state.threshold_adapt,
-            target_rate=jnp.full_like(state.firing_rate, 5.0),
-            dopamine=state.dopamine,
-            value_estimate=state.value_estimate,
-            reward_prediction_error=0.0,
-            is_excitatory=state.is_excitatory,
-            neuron_types=state.neuron_types,
-            learning_rate=state.learning_rate,
-            weight_momentum=state.weight_momentum,
-            timestep=state.timestep,
-            episode=state.episodes_completed,
-            input_spike=input_spikes,
-            input_trace=state.input_buffer  # Use input values as trace
-        )
-    
-    @staticmethod
-    def _network_state_to_agent_state_static(
-        network_state: NetworkState,
-        original_state: NeoAgentState
-    ) -> NeoAgentState:
-        """Convert network state back to agent state - static for JIT."""
-        return original_state._replace(
-            v=network_state.v,
-            spike=network_state.spike,
-            refractory=network_state.refractory,
-            w=network_state.w,
-            syn_current_e=network_state.syn_current_e,
-            syn_current_i=network_state.syn_current_i,
-            trace_pre=network_state.trace_pre,
-            trace_post=network_state.trace_post,
-            eligibility_trace=network_state.eligibility_trace,
-            firing_rate=network_state.firing_rate,
-            threshold_adapt=network_state.threshold_adapt,
-            dopamine=network_state.dopamine,
-            value_estimate=network_state.value_estimate,
-            weight_momentum=network_state.weight_momentum,
-        )
-    
-    def _agent_state_to_network_state(self, state: NeoAgentState) -> NetworkState:
-        """Instance method wrapper."""
-        return self._agent_state_to_network_state_static(state)
-    
-    def _network_state_to_agent_state(
-        self,
-        network_state: NetworkState,
-        original_state: NeoAgentState
-    ) -> NeoAgentState:
-        """Instance method wrapper."""
-        return self._network_state_to_agent_state_static(network_state, original_state)
     
     def _export_network_structure(self) -> None:
         """Export network structure to exporter."""
@@ -420,37 +354,3 @@ class NeoAgent:
             self.network_config.num_readout
         )
     
-    def _create_neo_config(self, exp_config: ExperimentConfig) -> NeoConfig:
-        """Create NeoConfig from ExperimentConfig."""
-        # Extract parameters from ExperimentConfig
-        
-        # Separate network and dynamics params
-        network_params = {}
-        dynamics_params = {}
-        
-        for key, value in exp_config.neural_params.items():
-            if key in ["num_sensory", "num_processing", "num_readout", "excitatory_ratio"]:
-                network_params[key] = value
-            elif key in ["tau_v", "v_threshold", "v_rest", "v_reset"]:
-                dynamics_params[key] = value
-        
-        # Add learning params to dynamics
-        for key, value in exp_config.learning_params.items():
-            if key not in ["enabled_rules", "base_learning_rate", "learning_rate_decay"]:
-                dynamics_params[key] = value
-        
-        config_dict = {
-            "world": exp_config.world_params,
-            "network": network_params,
-            "dynamics": dynamics_params,
-            "learning_rules": {
-                "enabled_rules": exp_config.learning_params.get("enabled_rules", ["stdp", "homeostasis"]),
-                "base_learning_rate": exp_config.learning_params.get("base_learning_rate", 0.1),
-                "learning_rate_decay": exp_config.learning_params.get("learning_rate_decay", 0.98)
-            },
-            "experiment": {
-                "n_episodes": exp_config.world_params.get("n_episodes", 50),
-                "seed": exp_config.world_params.get("seed", 42)
-            }
-        }
-        return NeoConfig.from_dict(config_dict)

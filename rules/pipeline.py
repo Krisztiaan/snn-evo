@@ -13,7 +13,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import jax
 from jax import jit
 
-from .base import LearningRule, NetworkState, RuleContext
+from .base import LearningRule, RuleContext
 
 
 class RulePipeline:
@@ -54,27 +54,14 @@ class RulePipeline:
     
     def _validate_rules(self) -> None:
         """Validate that rules are compatible."""
-        # Check that modified fields don't conflict
-        all_modifies = set()
-        for rule in self.rules:
-            modifies = rule.modifies
-            # For now, we allow multiple rules to modify the same field
-            # In the future, we might want to check for conflicts
-            all_modifies.update(modifies)
-        
-        # Check that required fields are available
-        available_fields = set(NetworkState._fields)
-        for rule in self.rules:
-            missing = rule.requires - available_fields
-            if missing:
-                raise ValueError(
-                    f"Rule {rule.name} requires fields {missing} "
-                    f"which are not in NetworkState"
-                )
+        # Since we're using concrete NeoAgentState type in the rules,
+        # we skip runtime validation. The type system will catch any
+        # incompatibilities at the rule implementation level.
+        pass
     
     def _create_pipeline(self) -> Callable:
         """Create the pipeline function."""
-        def pipeline(state: NetworkState, context: RuleContext) -> NetworkState:
+        def pipeline(state: Any, context: RuleContext) -> Any:
             # Apply each rule in sequence
             for rule in self.rules:
                 state = rule.apply(state, context)
@@ -82,7 +69,7 @@ class RulePipeline:
         
         return pipeline
     
-    def initialize(self, sample_state: NetworkState) -> None:
+    def initialize(self, sample_state: Any) -> None:
         """Initialize all rules in the pipeline."""
         for rule in self.rules:
             if hasattr(rule, 'initialize'):

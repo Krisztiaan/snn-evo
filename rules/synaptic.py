@@ -13,8 +13,9 @@ import jax
 import jax.numpy as jnp
 from jax import Array
 
-from .base import AbstractLearningRule, NetworkState, RuleContext
+from .base import AbstractLearningRule, RuleContext
 from .registry import register_rule
+from models.phase_0_14_neo.state import NeoAgentState
 
 
 @register_rule("stdp", category="synaptic", description="Spike-Timing-Dependent Plasticity")
@@ -69,7 +70,7 @@ class STDPRule(AbstractLearningRule):
     def modifies(self) -> set[str]:
         return {"w", "trace_pre", "trace_post"}
     
-    def apply(self, state: NetworkState, context: RuleContext) -> NetworkState:
+    def apply(self, state: NeoAgentState, context: RuleContext) -> NeoAgentState:
         """Apply STDP rule."""
         # Update traces with exponential decay
         dt = context.dt
@@ -91,24 +92,10 @@ class STDPRule(AbstractLearningRule):
         n_inputs = n_pre_total - n_neurons
         
         # Create pre-synaptic activity vector (inputs + neurons)
-        if state.input_spike is not None and state.input_spike.shape[0] == n_inputs:
-            # Use actual input spikes if available
-            input_spikes = state.input_spike
-        else:
-            # Otherwise assume no input spikes
-            input_spikes = jnp.zeros(n_inputs)
-            
-        pre_spikes = jnp.concatenate([input_spikes, state.spike])
+        pre_spikes = jnp.concatenate([state.input_buffer > 0.5, state.spike.astype(jnp.float32)])
         
         # Create pre-synaptic trace vector
-        if state.input_trace is not None and state.input_trace.shape[0] == n_inputs:
-            # Use actual input traces if available
-            input_traces = state.input_trace
-        else:
-            # Otherwise assume no input traces
-            input_traces = jnp.zeros(n_inputs)
-            
-        pre_traces = jnp.concatenate([input_traces, state.trace_pre])
+        pre_traces = jnp.concatenate([state.input_buffer, state.trace_pre])
         
         # LTP: pre-synaptic trace * post-synaptic spike
         ltp = self.a_plus * jnp.outer(state.spike, pre_traces)
@@ -177,7 +164,7 @@ class HebbianRule(AbstractLearningRule):
     def modifies(self) -> set[str]:
         return {"w"}
     
-    def apply(self, state: NetworkState, context: RuleContext) -> NetworkState:
+    def apply(self, state: NeoAgentState, context: RuleContext) -> NeoAgentState:
         """Apply Hebbian learning rule."""
         # Convert spikes to float
         pre_activity = state.spike.astype(jnp.float32)
@@ -250,7 +237,7 @@ class CovarianceRule(AbstractLearningRule):
     def modifies(self) -> set[str]:
         return {"w"}
     
-    def apply(self, state: NetworkState, context: RuleContext) -> NetworkState:
+    def apply(self, state: NeoAgentState, context: RuleContext) -> NeoAgentState:
         """Apply covariance learning rule."""
         # Get firing rates
         post_rate = state.firing_rate

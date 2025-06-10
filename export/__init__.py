@@ -10,9 +10,8 @@ from typing import List
 # Version of the export module. Define this FIRST to avoid circular imports.
 __version__ = "3.0.0"
 
-# Import the primary DataExporter and Episode classes
+# Import the primary DataExporter class
 from .jax_data_exporter import JaxDataExporter as DataExporter, ExperimentConfig
-from .episode import Episode
 
 # Import data loading utilities
 from .loader import EpisodeData, ExperimentLoader
@@ -24,7 +23,6 @@ from .utils import ensure_numpy
 __all__: List[str] = [
     "DataExporter",
     "ExperimentConfig",
-    "Episode",
     "EpisodeData",
     "ExperimentLoader",
     "ensure_numpy",

@@ -1,14 +1,18 @@
 # keywords: [random agent, protocol compliant, jax, stateful]
 """Random agent - Compliant with AgentProtocol."""
 
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any
 import jax
 import jax.numpy as jnp
 from jax import Array
 from jax.random import PRNGKey, split, randint
 from functools import partial
+from collections import namedtuple
 
 from interfaces import AgentProtocol, ExperimentConfig, ExporterProtocol, EpisodeData
+
+# Simple state for random agent
+RandomAgentState = namedtuple('RandomAgentState', ['timestep', 'reward_count'])
 
 
 class RandomAgent:
@@ -27,14 +31,13 @@ class RandomAgent:
         self.config = config
         self.exporter = exporter
         
-        # Internal state - we'll collect data in the episode buffer
-        self.episode_buffer = None
-        self.log_timestep_fn = None
-        self.current_timestep = 0
+        # Internal state
+        self.state = None
     
-    def reset(self, key: PRNGKey) -> None:
+    def reset(self, key: PRNGKey) -> RandomAgentState:
         """Reset agent's internal state for new episode."""
-        self.current_timestep = 0
+        self.state = RandomAgentState(timestep=0, reward_count=0)
+        return self.state
     
     @staticmethod
     @jax.jit
@@ -44,61 +47,42 @@ class RandomAgent:
         action = randint(key, (), 0, 9)
         return action
     
-    def act(self, gradient: Array, key: PRNGKey) -> Array:
-        """Select random action based on gradient observation.
+    def act(self, gradient: Array, key: PRNGKey) -> Tuple[Array, Any, Dict[str, Array]]:
+        """Select action and update host-side state for non-JIT execution.
         
         Args:
             gradient: float32 scalar in [0, 1], distance signal to nearest reward
             key: JAX random key for stochastic action selection
             
         Returns:
-            action: Array scalar int32 0-8 encoding movement and rotation
+            Tuple of:
+                - action: Array scalar int32 0-8 encoding movement and rotation
+                - state: Updated agent state (for interface compatibility)
+                - neural_data: Empty dict for random agent
         """
-        # Use JIT-compiled pure function
-        action = self._act_pure(gradient, key)
+        # Call the pure JIT function with the current host state
+        new_state, action, neural_data = self.step(self.state, gradient, key)
         
-        # Track timestep for buffer management
-        self.current_timestep += 1
+        # Update the host-side state
+        self.state = new_state
         
-        return action
+        return action, self.state, neural_data
     
-    def get_episode_data(self) -> EpisodeData:
-        """Get standardized episode data for logging after episode ends."""
-        # The episode buffer contains all the data
-        # Extract what we need for EpisodeData
-        if self.episode_buffer is not None:
-            # Get data up to current timestep
-            actions = self.episode_buffer.actions[:self.current_timestep]
-            gradients = self.episode_buffer.gradients[:self.current_timestep]
-            
-            # Count reward events
-            reward_count = jnp.sum(gradients == 1.0)
-        else:
-            # No episode run yet
-            actions = jnp.array([], dtype=jnp.int32)
-            gradients = jnp.array([], dtype=jnp.float32)
-            reward_count = 0
+    @staticmethod
+    @jax.jit
+    def step(state: RandomAgentState, gradient: Array, key: PRNGKey) -> Tuple[RandomAgentState, Array, Dict[str, Array]]:
+        """Pure, JIT-compilable agent step function."""
+        # Random action selection
+        action = randint(key, (), 0, 9)
         
-        return EpisodeData(
-            actions=actions,
-            gradients=gradients,
-            # No neural data for random agent
-            neural_states=None,
-            spikes=None,
-            # No weight data
-            weights_initial=None,
-            weights_final=None,
-            weight_changes=None,
-            # No learning signals
-            eligibility_traces=None,
-            dopamine_levels=None,
-            # Performance metrics
-            total_reward_events=int(reward_count),
-            exploration_entropy=None  # Could compute action entropy if needed
+        # Update state
+        reward_received = gradient >= 0.99
+        new_state = RandomAgentState(
+            timestep=state.timestep + 1,
+            reward_count=state.reward_count + jnp.where(reward_received, 1, 0)
         )
-    
-    def start_episode(self, episode_id: int) -> Tuple:
-        """Start new episode and get buffer and logging function from exporter."""
-        self.episode_buffer, self.log_timestep_fn = self.exporter.start_episode(episode_id)
-        self.current_timestep = 0
-        return self.episode_buffer, self.log_timestep_fn
+        
+        # No neural data for random agent
+        neural_data = {}
+        
+        return new_state, action, neural_data

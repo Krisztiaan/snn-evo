@@ -1,165 +1,199 @@
-# keywords: [experiment runner, type safe, performance, interfaces]
-"""type-safe experiment runner using protocol interfaces."""
+#!/usr/bin/env python3
+# keywords: [unified runner, cli, experiment runner, jax performance, protocol compliant]
+"""
+Unified CLI runner for all metalearning experiments.
 
+This is the main entry point for running experiments. It supports JIT compilation,
+vmap for parallel episodes, and configuration via JSON files.
+"""
+
+import argparse
+import json
+import sys
 import time
 from pathlib import Path
+from typing import Dict, Any
 
-import jax.random as jrandom
+import jax
+from jax.random import PRNGKey
 
-from interfaces import (
-    AgentProtocol,
-    ExperimentConfig,
-    ExporterProtocol,
-    WorldProtocol,
-)
+# Import protocol interfaces and implementations
+from interfaces import ExperimentConfig, ProtocolRunner
+from interfaces.config import WorldConfig, NeuralConfig, PlasticityConfig, AgentBehaviorConfig
+from world.simple_grid_0004 import MinimalGridWorld
+from export.jax_data_exporter import JaxDataExporter
+from models.random.agent import RandomAgent
+from models.phase_0_14_neo.agent import NeoAgent
+
+# Agent registry to select agents from the command line
+AGENT_REGISTRY = {
+    "random": RandomAgent,
+    "neo": NeoAgent,
+}
 
 
-class ExperimentRunner:
-    """Runs experiments with type-safe interfaces and performance monitoring."""
+def create_agent(agent_name: str, config: ExperimentConfig, exporter: JaxDataExporter):
+    """Create an agent instance based on its name."""
+    agent_name = agent_name.lower()
+    if agent_name not in AGENT_REGISTRY:
+        raise ValueError(f"Unknown agent: {agent_name}. Available: {list(AGENT_REGISTRY.keys())}")
 
-    def __init__(
-        self,
-        world_class: type[WorldProtocol],
-        agent_class: type[AgentProtocol],
-        exporter_class: type[ExporterProtocol],
-        config: ExperimentConfig,
-    ):
-        """Initialize runner with component classes and configuration.
+    agent_class = AGENT_REGISTRY[agent_name]
+    return agent_class(config, exporter)
 
-        Args:
-            world_class: World implementation class
-            agent_class: Agent implementation class
-            exporter_class: Exporter implementation class
-            config: Experiment configuration
-        """
-        self.world_class = world_class
-        self.agent_class = agent_class
-        self.exporter_class = exporter_class
-        self.config = config
 
-    def run(self) -> None:
-        """Run the complete experiment."""
-        # Initialize random key
-        key = jrandom.PRNGKey(self.config.seed)
+def load_config(config_path: Path) -> Dict[str, Any]:
+    """Load configuration from a JSON file."""
+    with open(config_path, "r") as f:
+        return json.load(f)
 
-        # Create output directory
-        output_dir = Path(self.config.export_dir) / self.config.experiment_name
 
-        # Initialize components
-        world = self.world_class(self.config.world)
+def merge_configs(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    """Recursively merge override config into base config."""
+    result = base.copy()
+    for key, value in override.items():
+        if key in result and isinstance(result.get(key), dict) and isinstance(value, dict):
+            result[key] = merge_configs(result[key], value)
+        else:
+            result[key] = value
+    return result
 
-        with self.exporter_class(
-            self.config.experiment_name,
-            self.config,
-            output_dir,
-            compression="gzip",
-            log_to_console=True,
-        ) as exporter:
-            # Save experiment metadata
-            agent = self.agent_class(self.config, exporter)
-            exporter.save_experiment_metadata(
-                agent_version=agent.VERSION,
-                agent_name=agent.MODEL_NAME,
-                agent_description=agent.DESCRIPTION,
-                world_version=world.get_config()["version"],
-            )
 
-            # Save network structure if applicable
-            if hasattr(agent, "get_network_structure"):
-                structure = agent.get_network_structure()
-                exporter.save_network_structure(**structure)
+def create_experiment_config(args) -> ExperimentConfig:
+    """Create a final ExperimentConfig from defaults, JSON files, and CLI args."""
+    # Start with a sensible default configuration
+    config_dict = ExperimentConfig(
+        world=WorldConfig(),
+        neural=NeuralConfig(),
+        plasticity=PlasticityConfig(),
+        behavior=AgentBehaviorConfig(),
+        experiment_name="default_experiment",
+        agent_version="unknown",
+        world_version="unknown",
+        n_episodes=100,
+        seed=42,
+        device="gpu" if jax.default_backend() != "cpu" else "cpu",
+        export_dir="experiments/",
+        log_to_console=True,
+    ).to_dict()
 
-            # Run episodes
-            for episode_id in range(self.config.n_episodes):
-                key, episode_key = jrandom.split(key)
-                self._run_episode(world, agent, exporter, episode_id, episode_key)
+    # Load and merge config files if provided
+    if args.config:
+        file_config = load_config(args.config)
+        config_dict = merge_configs(config_dict, file_config)
 
-                # Save checkpoint periodically
-                if (episode_id + 1) % self.config.checkpoint_every_n_episodes == 0:
-                    if hasattr(agent, "get_weights"):
-                        weights = agent.get_weights()
-                        if weights is not None:
-                            exporter.save_checkpoint(episode_id, weights)
+    # Apply command-line overrides
+    config_dict["experiment_name"] = args.name
+    config_dict["n_episodes"] = args.episodes
+    config_dict["seed"] = args.seed
+    config_dict["log_to_console"] = not args.quiet
+    if args.output_dir:
+        config_dict["export_dir"] = str(args.output_dir)
+    if args.max_timesteps:
+        config_dict["world"]["max_timesteps"] = args.max_timesteps
 
-    def _run_episode(
-        self,
-        world: WorldProtocol,
-        agent: AgentProtocol,
-        exporter: ExporterProtocol,
-        episode_id: int,
-        key: jrandom.PRNGKey,
-    ) -> None:
-        """Run a single episode with performance monitoring."""
-        # Split keys
-        key, world_key, agent_key = jrandom.split(key, 3)
+    # Create the final, type-safe ExperimentConfig object
+    return ExperimentConfig(
+        world=WorldConfig(**config_dict["world"]),
+        neural=NeuralConfig(**config_dict["neural"]),
+        plasticity=PlasticityConfig(**config_dict["plasticity"]),
+        behavior=AgentBehaviorConfig(**config_dict["behavior"]),
+        **{
+            k: v
+            for k, v in config_dict.items()
+            if k not in ["world", "neural", "plasticity", "behavior"]
+        },
+    )
 
-        # Reset world and agent
-        initial_gradient = world.reset(world_key)
-        agent.reset(agent_key)
 
-        # Start episode
-        buffer, log_fn = exporter.start_episode(episode_id)
+def main():
+    """Main entry point for the unified runner."""
+    parser = argparse.ArgumentParser(
+        description="Unified runner for SNN experiments.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
 
-        # Episode timing
-        start_time = time.perf_counter()
+    # Core arguments
+    parser.add_argument("agent", choices=list(AGENT_REGISTRY.keys()), help="Agent to run.")
+    parser.add_argument("--name", default="unified_run", help="Experiment name.")
+    parser.add_argument("--episodes", type=int, default=100, help="Number of episodes.")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed.")
 
-        # Run episode
-        gradient = initial_gradient
-        timestep = 0
+    # Configuration
+    parser.add_argument("--config", type=Path, help="Path to a base JSON config file.")
 
-        # Main episode loop - optimized for performance
-        while timestep < self.config.world.max_timesteps:
-            # Agent action selection
-            key, action_key = jrandom.split(key)
-            action = agent.act(gradient, action_key)
+    # Overrides
+    parser.add_argument("--max-timesteps", type=int, help="Override max timesteps per episode.")
 
-            # World step
-            gradient = world.step(action)
+    # Execution control
+    parser.add_argument(
+        "--no-jit", action="store_true", help="Disable JIT compilation for debugging."
+    )
+    parser.add_argument(
+        "--parallel-episodes",
+        type=int,
+        default=1,
+        help="Number of episodes to run in parallel with vmap (GPU/TPU only).",
+    )
 
-            # Log timestep (JIT-compiled, no I/O)
-            neural_state = agent.get_neural_state()
-            buffer = log_fn(buffer, timestep, gradient, action, neural_state)
+    # Output control
+    parser.add_argument("--output-dir", type=Path, help="Base directory for experiment data.")
+    parser.add_argument("--quiet", action="store_true", help="Suppress console output.")
 
-            timestep += 1
+    args = parser.parse_args()
 
-            # Optional: Early termination based on world state
-            # (not implemented in current minimal interface)
+    # --- Setup ---
+    if not args.quiet:
+        print("=" * 60)
+        print(f"JAX backend: {jax.default_backend()}, Devices: {jax.devices()}")
+        print("=" * 60)
 
-        # Get episode data
-        episode_data = agent.get_episode_data()
-        reward_tracking = world.get_reward_tracking()
+    config = create_experiment_config(args)
 
-        # Finalize episode (I/O happens here)
-        stats = exporter.end_episode(buffer, episode_data, reward_tracking, success=True)
+    world = MinimalGridWorld(config.world)
 
-        # Log performance
-        if self.config.log_every_n_steps > 0:
+    experiment_name = f"{args.agent}_{config.experiment_name}_{config.seed}"
+    exporter = JaxDataExporter(
+        experiment_name=experiment_name, config=config, output_base_dir=config.export_dir
+    )
+
+    agent = create_agent(args.agent, config, exporter)
+
+    runner = ProtocolRunner(world, agent, exporter, config)
+
+    if not args.quiet:
+        print(f"Running experiment: {experiment_name}")
+        print(f"Agent: {args.agent} (v{agent.VERSION}) | World: v{world.VERSION}")
+        print(
+            f"Total Episodes: {config.n_episodes}, Timesteps/Episode: {config.world.max_timesteps}"
+        )
+        print(f"Outputting to: {exporter.output_dir}")
+        print("-" * 60)
+
+    # --- Execution ---
+    start_time = time.perf_counter()
+    if args.parallel_episodes > 1:
+        if "cpu" in jax.default_backend() and not args.quiet:
             print(
-                f"Episode {episode_id}: {stats['steps_per_second']:.0f} steps/s, "
-                f"{stats['total_rewards']:.0f} rewards"
+                "Warning: --parallel-episodes > 1 is not effective on CPU. Use a GPU/TPU for performance."
             )
+        runner.run_experiment_vmap(num_parallel_episodes=args.parallel_episodes)
+    else:
+        runner.run_experiment(use_jit=not args.no_jit)
+
+    duration = time.perf_counter() - start_time
+
+    # --- Summary ---
+    if not args.quiet:
+        print("-" * 60)
+        print("Experiment Complete")
+        print(f"Total duration: {duration:.2f} seconds")
+        print(f"Data saved to: {exporter.output_dir}")
+        print("=" * 60)
+
+    exporter.close()
+    return 0
 
 
-def validate_implementation(
-    world_class: type[WorldProtocol],
-    agent_class: type[AgentProtocol],
-    exporter_class: type[ExporterProtocol],
-) -> None:
-    """Validate that implementations satisfy protocol requirements."""
-    # Check class attributes
-    assert hasattr(agent_class, "VERSION"), "Agent must have VERSION attribute"
-    assert hasattr(agent_class, "MODEL_NAME"), "Agent must have MODEL_NAME attribute"
-    assert hasattr(agent_class, "DESCRIPTION"), "Agent must have DESCRIPTION attribute"
-    assert hasattr(exporter_class, "VERSION"), "Exporter must have VERSION attribute"
-
-    # Check methods exist
-    assert hasattr(world_class, "reset"), "World must implement reset()"
-    assert hasattr(world_class, "step"), "World must implement step()"
-    assert hasattr(world_class, "get_config"), "World must implement get_config()"
-    assert hasattr(world_class, "get_reward_tracking"), "World must implement get_reward_tracking()"
-
-    assert hasattr(agent_class, "reset"), "Agent must implement reset()"
-    assert hasattr(agent_class, "act"), "Agent must implement act()"
-    assert hasattr(agent_class, "get_episode_data"), "Agent must implement get_episode_data()"
-
-    print("✓ All implementations satisfy protocol requirements")
+if __name__ == "__main__":
+    sys.exit(main())

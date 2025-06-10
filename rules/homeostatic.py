@@ -10,8 +10,9 @@ import jax
 import jax.numpy as jnp
 from jax import Array
 
-from .base import AbstractLearningRule, NetworkState, RuleContext
+from .base import AbstractLearningRule, RuleContext
 from .registry import register_rule
+from models.phase_0_14_neo.state import NeoAgentState
 
 
 @register_rule("homeostatic", category="homeostatic", description="Firing rate homeostasis")
@@ -62,7 +63,7 @@ class HomeostaticRule(AbstractLearningRule):
     def modifies(self) -> set[str]:
         return {"w", "firing_rate"}
     
-    def apply(self, state: NetworkState, context: RuleContext) -> NetworkState:
+    def apply(self, state: NeoAgentState, context: RuleContext) -> NeoAgentState:
         """Apply homeostatic plasticity."""
         dt = context.dt
         
@@ -144,7 +145,7 @@ class ThresholdAdaptationRule(AbstractLearningRule):
     def modifies(self) -> set[str]:
         return {"firing_rate", "threshold_adapt"}
     
-    def apply(self, state: NetworkState, context: RuleContext) -> NetworkState:
+    def apply(self, state: NeoAgentState, context: RuleContext) -> NeoAgentState:
         """Apply threshold adaptation."""
         dt = context.dt
         
@@ -221,12 +222,12 @@ class SynapticScalingRule(AbstractLearningRule):
     def modifies(self) -> set[str]:
         return {"w"}
     
-    def initialize(self, sample_state: NetworkState) -> None:
+    def initialize(self, sample_state: NeoAgentState) -> None:
         """Initialize average input tracker."""
         super().initialize(sample_state)
         self._avg_input = jnp.zeros(len(sample_state.v))
     
-    def apply(self, state: NetworkState, context: RuleContext) -> NetworkState:
+    def apply(self, state: NeoAgentState, context: RuleContext) -> NeoAgentState:
         """Apply synaptic scaling."""
         dt = context.dt
         
