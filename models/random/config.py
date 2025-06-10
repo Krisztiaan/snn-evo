@@ -3,7 +3,7 @@
 
 from typing import NamedTuple
 
-from world.simple_grid_0001 import WorldConfig
+from interfaces import WorldConfig
 
 
 class RandomAgentConfig(NamedTuple):

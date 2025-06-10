@@ -1,7 +1,8 @@
-# keywords: [episode, hdf5, buffered dataset, sparse data, memory management]
+# keywords: [episode, hdf5, buffered dataset, performance]
 """Manages data storage for a single episode with high performance."""
 
 import threading
+import jax.numpy as jnp
 import warnings
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
@@ -9,40 +10,14 @@ from typing import Any, Dict, Optional, Tuple
 import h5py
 import numpy as np
 
-from .performance import AdaptiveCompressor, AsyncWriteQueue, PerformanceProfiler, RealtimeStats
 from .schema import validate_timestep_data
-from .utils import ensure_numpy, optimize_jax_conversion
+from .utils import ensure_numpy
 
 # Global HDF5 lock for thread safety across all exporter instances
 _HDF5_LOCK = threading.RLock()
 
 # Constants
-ASYNC_THRESHOLD = 100
 DEFAULT_BUFFER_THRESHOLD = 1000
-MAX_MEMORY_MB = 500
-MEMORY_CHECK_INTERVAL = 100
-MEMORY_MAP_BLOCK_SIZE = 2**20
-
-
-class MemoryTracker:
-    """Tracks memory usage of buffers to trigger flushes when needed."""
-
-    def __init__(self, max_memory_bytes: int = MAX_MEMORY_MB * 1024 * 1024):
-        self.max_memory = max_memory_bytes
-        self.current_usage = 0
-        self._lock = threading.Lock()
-
-    def add(self, nbytes: int) -> None:
-        with self._lock:
-            self.current_usage += nbytes
-
-    def remove(self, nbytes: int) -> None:
-        with self._lock:
-            self.current_usage = max(0, self.current_usage - nbytes)
-
-    def should_flush(self) -> bool:
-        with self._lock:
-            return self.current_usage > self.max_memory
 
 
 class BufferedDataset:
@@ -57,14 +32,10 @@ class BufferedDataset:
         chunk_size: int,
         compression: Optional[str],
         compression_opts: int,
-        async_queue: Optional[AsyncWriteQueue],
-        memory_tracker: MemoryTracker,
         flush_at_episode_end: bool = False,
     ):
         self.name = name
         self.chunk_size = chunk_size
-        self.async_queue = async_queue
-        self.memory_tracker = memory_tracker
         self.flush_at_episode_end = flush_at_episode_end
         self._lock = threading.Lock()
         self.pending_data_blocks: list[np.ndarray] = []
@@ -73,8 +44,6 @@ class BufferedDataset:
         self.buffer_threshold = max(1, min(chunk_size // 10, DEFAULT_BUFFER_THRESHOLD))
         self.buffer = np.empty((self.buffer_threshold, *item_shape), dtype=dtype)
         self.buffer_pos = 0
-        if self.memory_tracker:
-            self.memory_tracker.add(self.buffer.nbytes)
 
         with _HDF5_LOCK:
             create_kwargs: Dict[str, Any] = {
@@ -83,8 +52,12 @@ class BufferedDataset:
                 "maxshape": (None, *item_shape),
                 "dtype": dtype,
             }
-            if all(s > 0 for s in shape):
-                create_kwargs["chunks"] = (min(chunk_size, self.buffer_threshold), *item_shape)
+            # Always set chunking and compression for resizable datasets
+            if len(shape) > 0:
+                # For resizable datasets, first dimension can be 0
+                chunk_shape = (min(chunk_size, self.buffer_threshold), *item_shape) if item_shape else (min(chunk_size, self.buffer_threshold),)
+                create_kwargs["chunks"] = chunk_shape
+                
                 if compression:
                     create_kwargs.update(
                         {"compression": compression, "shuffle": True, "fletcher32": True}
@@ -101,12 +74,7 @@ class BufferedDataset:
             self.buffer[self.buffer_pos] = data
             self.buffer_pos += 1
 
-            # Condition 1: Must flush this buffer to disk due to overall memory pressure
-            # This check is crucial to prevent unbounded memory growth if MemoryTracker signals.
-            if self.memory_tracker.should_flush() and self.buffer_pos > 0:
-                self._flush_current_buffer_to_disk()  # This writes to HDF5 and resets buffer_pos
-
-            # Condition 2: Buffer is full (check buffer_pos again as it might have been reset by memory pressure flush)
+            # Buffer is full
             if self.buffer_pos >= self.buffer_threshold:
                 if self.flush_at_episode_end:
                     # Accumulate in memory if flush_at_episode_end is true
@@ -133,36 +101,18 @@ class BufferedDataset:
                 self._flush_all_pending_blocks_to_disk()
 
     def _flush_current_buffer_to_disk(self) -> None:
-        # Renamed from _flush_unlocked; handles writing self.buffer to disk
         if self.buffer_pos == 0:
             return
         new_data = self.buffer[: self.buffer_pos]
         n_new = self.buffer_pos
         self.buffer_pos = 0  # Reset buffer position
-
-        if self.async_queue and n_new > ASYNC_THRESHOLD:
-            data_copy = new_data.copy()
-            start_idx = self.current_size
-            # Important: self.current_size is updated optimistically for async writes.
-            # The actual HDF5 file size grows when the async worker processes it.
-            with self._lock:  # Protect current_size update for async scenario
-                self.current_size += n_new
-            self.async_queue.submit(self._do_async_write, data_copy, start_idx)
-        else:
-            self._do_sync_write(new_data)  # This updates self.current_size internally
+        self._do_sync_write(new_data)
 
     def _flush_all_pending_blocks_to_disk(self) -> None:
         # Writes all accumulated pending_data_blocks to disk.
-        # Uses synchronous writes for simplicity and safety with current_size updates.
         for block_data in self.pending_data_blocks:
-            self._do_sync_write(block_data)  # _do_sync_write updates self.current_size
+            self._do_sync_write(block_data)
         self.pending_data_blocks.clear()
-
-    def _flush_unlocked(self) -> None:
-        # This method is now effectively replaced by _flush_current_buffer_to_disk
-        # and the logic in append/flush.
-        # For safety, let's make it call the new primary flush mechanism for the buffer.
-        self._flush_current_buffer_to_disk()
 
     def _do_sync_write(self, new_data: np.ndarray) -> None:
         n_new = len(new_data)
@@ -176,28 +126,11 @@ class BufferedDataset:
             self.dataset[self.current_size : new_size] = new_data
         self.current_size = new_size
 
-    def _do_async_write(self, data: np.ndarray, start_idx: int) -> None:
-        n_new = len(data)
-        new_size = start_idx + n_new
-        with _HDF5_LOCK:
-            if new_size > self.allocated_size:
-                with self._lock:
-                    if new_size > self.allocated_size:
-                        self.allocated_size = int(
-                            max(new_size * 1.5, self.allocated_size + self.chunk_size)
-                        )
-                        self.dataset.resize(self.allocated_size, axis=0)
-            self.dataset[start_idx:new_size] = data
-
     def finalize(self) -> None:
         self.flush()
         if self.current_size < self.allocated_size:
             with _HDF5_LOCK:
                 self.dataset.resize(self.current_size, axis=0)
-
-    def __del__(self) -> None:
-        if hasattr(self, "memory_tracker") and self.memory_tracker and hasattr(self, "buffer"):
-            self.memory_tracker.remove(self.buffer.nbytes)
 
 
 class Episode:
@@ -208,22 +141,20 @@ class Episode:
         episode_id: int,
         h5_group: Optional[h5py.Group],
         config: Dict[str, Any],
-        adaptive_compressor: Optional[AdaptiveCompressor],
-        realtime_stats: Optional[RealtimeStats],
-        profiler: Optional[PerformanceProfiler],
-        memory_tracker: MemoryTracker,
     ):
         self.episode_id = episode_id
         self.config = config
-        self.profiler = profiler
-        self.realtime_stats = realtime_stats
-        self.validate_data = config.get("validate_data", True)
         self.neural_sampling_rate = config.get("neural_sampling_rate", 100)
 
         self.timestep_count = 0
         self.last_neural_sample = -self.neural_sampling_rate
 
         self.group: Optional[h5py.Group] = None
+        self.neural_group: Optional[h5py.Group] = None
+        self.behavior_group: Optional[h5py.Group] = None
+        self.events_group: Optional[h5py.Group] = None
+        self.plasticity_group: Optional[h5py.Group] = None
+        
         if h5_group is not None:
             self.group = h5_group.create_group(f"episode_{episode_id:04d}")
             self.group.attrs["episode_id"] = episode_id
@@ -233,38 +164,54 @@ class Episode:
             self.behavior_group = self.group.create_group("behavior")
             self.events_group = self.group.create_group("events")
             self.plasticity_group = self.group.create_group("plasticity")
-            self.data_manager = EpisodeDataManager(self.group, config, memory_tracker)
+            self.data_manager = EpisodeDataManager(self.group, config)
         else:
             # no_write mode, create dummy manager
             self.data_manager = None  # type: ignore
 
     def log_timestep(self, **kwargs: Any) -> None:
         """Log data for a single timestep with optimized storage."""
-        if self.validate_data:
-            warnings_list = validate_timestep_data(**kwargs)
-            for w in warnings_list:
-                warnings.warn(f"Validation: {w}", stacklevel=2)
+        warnings_list = validate_timestep_data(**kwargs)
+        for w in warnings_list:
+            warnings.warn(f"Validation: {w}", stacklevel=2)
 
         self.timestep_count += 1
         timestep = kwargs["timestep"]
 
-        if (data := kwargs.get("neural_state")) and (
+        if (data := kwargs.get("neural_state")) is not None and (
             timestep - self.last_neural_sample >= self.neural_sampling_rate
         ):
-            self._append_dict_data(self.neural_group, timestep, data)
+            if self.neural_group is not None:
+                # Handle both dict and array inputs
+                if isinstance(data, dict):
+                    self._append_dict_data(self.neural_group, timestep, data)
+                else:
+                    # Convert array to dict with single key
+                    self._append_dict_data(self.neural_group, timestep, {"state": data})
             self.last_neural_sample = timestep
 
-        if data := kwargs.get("behavior"):
-            self._append_dict_data(self.behavior_group, timestep, data)
+        if (data := kwargs.get("behavior")) is not None:
+            if self.behavior_group is not None:
+                self._append_dict_data(self.behavior_group, timestep, data)
 
-        # Spikes and rewards are handled via sparse writers or direct append
-        # in a more complete implementation, but this covers the main dict data.
-        # For this refactoring, we focus on the structure.
+        # Handle rewards (sparse data)
+        if (reward := kwargs.get("reward")) is not None and self.group is not None:
+            if "rewards" not in self.group:
+                self.group.create_group("rewards")
+            rewards_group = self.group["rewards"]
+            self._append_scalar_data(rewards_group, timestep, "values", float(reward))
+        
+        # Handle spikes (can be sparse or dense)
+        spikes = kwargs.get("spikes")
+        if spikes is not None and self.group is not None:
+            if "spikes" not in self.group:
+                self.group.create_group("spikes")
+            spikes_group = self.group["spikes"]
+            self._append_dict_data(spikes_group, timestep, {"spike_data": spikes})
 
     def _append_dict_data(self, group: h5py.Group, timestep: int, data: Dict[str, Any]) -> None:
         if self.data_manager is None:
             return
-        data = optimize_jax_conversion(data)
 
         ts_writer = self.data_manager.get_or_create_dataset(
             group, "timesteps", np.dtype(np.int64), (0,)
@@ -276,6 +223,28 @@ class Episode:
             shape = (0,) if value_np.ndim == 0 else (0, *value_np.shape)
             writer = self.data_manager.get_or_create_dataset(group, key, value_np.dtype, shape)
             writer.append(value_np)
+    
+    def _append_neural_state(self, timestep: int, data: Dict[str, Any]) -> None:
+        """Append neural state data (used for post-processing sampled data)."""
+        if self.neural_group is not None:
+            self._append_dict_data(self.neural_group, timestep, data)
+    
+    def _append_scalar_data(self, group: h5py.Group, timestep: int, name: str, value: float) -> None:
+        """Append scalar data efficiently."""
+        if self.data_manager is None:
+            return
+        
+        # Timesteps
+        ts_writer = self.data_manager.get_or_create_dataset(
+            group, "timesteps", np.dtype(np.int64), (0,)
+        )
+        ts_writer.append(np.array(timestep, dtype=np.int64))
+        
+        # Values
+        value_writer = self.data_manager.get_or_create_dataset(
+            group, name, np.dtype(np.float32), (0,)
+        )
+        value_writer.append(np.array(value, dtype=np.float32))
 
     def log_static_data(self, name: str, data: Dict[str, Any]) -> None:
         """Save static, one-off data for the episode."""
@@ -284,7 +253,19 @@ class Episode:
         with _HDF5_LOCK:
             group = self.group.create_group(name)
             for key, value in data.items():
-                group.create_dataset(key, data=ensure_numpy(value))
+                # Handle different data types efficiently
+                if isinstance(value, str):
+                    # HDF5 doesn't like Unicode, use fixed-length ASCII/UTF-8 bytes
+                    group.create_dataset(key, data=value.encode('utf-8'))
+                elif isinstance(value, (int, float, bool)):
+                    # Scalars
+                    group.create_dataset(key, data=value)
+                elif isinstance(value, (list, tuple)):
+                    # Convert to numpy array
+                    group.create_dataset(key, data=np.array(value))
+                else:
+                    # Already numpy array or array-like
+                    group.create_dataset(key, data=ensure_numpy(value))
 
     def log_event(self, name: str, timestep: int, data: Dict[str, Any]) -> None:
         """Log a discrete event with associated metadata."""
@@ -307,6 +288,7 @@ class Episode:
         synapse_id: Tuple[int, int],
         old_weight: float,
         new_weight: float,
+        learning_rule: Optional[str] = None,
     ) -> None:
         """Log a single synaptic weight change event."""
         if self.data_manager is None:
@@ -326,6 +308,15 @@ class Episode:
                 self.plasticity_group, name, dtype, (0,)
             )
             writer.append(np.array(value, dtype=dtype))
+        
+        # Store learning rule if provided as fixed-length string
+        if learning_rule is not None:
+            # Use fixed-length string type for HDF5 compatibility
+            rule_bytes = learning_rule.encode('utf-8')[:32]  # Limit to 32 chars
+            rule_writer = self.data_manager.get_or_create_dataset(
+                self.plasticity_group, "learning_rules", np.dtype('S32'), (0,)
+            )
+            rule_writer.append(np.array(rule_bytes, dtype='S32'))
 
     def end(self, success: bool = False) -> None:
         """End episode and flush all buffers."""
@@ -348,10 +339,9 @@ class Episode:
 class EpisodeDataManager:
     """Manages buffered dataset creation for an episode."""
 
-    def __init__(self, group: h5py.Group, config: Dict[str, Any], memory_tracker: MemoryTracker):
+    def __init__(self, group: h5py.Group, config: Dict[str, Any]):
         self.group = group
         self.config = config
-        self.memory_tracker = memory_tracker
         self.datasets: Dict[str, BufferedDataset] = {}
         self.flush_at_episode_end = self.config.get("flush_at_episode_end", False)
 
@@ -368,8 +358,6 @@ class EpisodeDataManager:
                 chunk_size=self.config.get("chunk_size", 10000),
                 compression=self.config.get("compression"),
                 compression_opts=self.config.get("compression_opts", 4),
-                async_queue=self.config.get("async_queue"),
-                memory_tracker=self.memory_tracker,
                 flush_at_episode_end=self.flush_at_episode_end,
             )
         return self.datasets[key]

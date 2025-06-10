@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(python:*)",
-      "Bash(h5dump:*)"
+      "Bash(h5dump:*)",
+      "Bash(pyright:*)",
+      "Bash(cat:*)"
     ],
     "deny": []
   }

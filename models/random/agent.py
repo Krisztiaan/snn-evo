@@ -1,119 +1,104 @@
-# keywords: [random agent, baseline agent, jax random actions]
-"""Random agent implementation."""
+# keywords: [random agent, protocol compliant, jax, stateful]
+"""Random agent - Compliant with AgentProtocol."""
 
-from typing import Any, Dict
-
+from typing import Optional, Tuple
+import jax
 import jax.numpy as jnp
-import numpy as np
-from jax import random
+from jax import Array
+from jax.random import PRNGKey, split, randint
+from functools import partial
 
-from export import DataExporter
-from world.simple_grid_0001 import SimpleGridWorld
-
-from .config import RandomAgentConfig
+from interfaces import AgentProtocol, ExperimentConfig, ExporterProtocol, EpisodeData
 
 
 class RandomAgent:
-    """Agent that selects random actions at each step."""
-
-    def __init__(self, config: RandomAgentConfig):
+    """Random agent that complies with AgentProtocol.
+    
+    Selects random actions at each timestep.
+    """
+    
+    # Agent metadata (required by protocol)
+    VERSION = "2.0.0"
+    MODEL_NAME = "Random-Baseline"
+    DESCRIPTION = "Random action selection baseline agent"
+    
+    def __init__(self, config: ExperimentConfig, exporter: ExporterProtocol) -> None:
+        """Initialize agent with configuration and exporter."""
         self.config = config
-        self.world = SimpleGridWorld(config.world_config)
-
-    def run(self) -> Dict[str, Any]:
-        """Run all episodes for the experiment."""
-        key = random.PRNGKey(self.config.seed)
-
-        with DataExporter(
-            experiment_name="random_agent_baseline",
-            output_base_dir=self.config.export_dir,
-            neural_sampling_rate=1,
-            compression="gzip",
-            compression_level=1,
-        ) as exporter:
-            config_dict = {
-                "agent_type": "random",
-                "world_config": self.config.world_config,
-                "n_episodes": self.config.n_episodes,
-                "n_steps": self.config.n_steps,
-                "seed": self.config.seed,
-            }
-            exporter.save_config(config_dict)
-
-            metadata = {
-                "description": "Random agent baseline in simple grid world",
-                "agent_details": "Selects uniformly random actions at each timestep",
-            }
-            exporter.save_metadata(metadata)
-
-            all_summaries = []
-            for episode_num in range(self.config.n_episodes):
-                key, episode_key = random.split(key)
-                print(f"\nRunning episode {episode_num + 1}/{self.config.n_episodes}")
-
-                summary = self._run_one_episode(exporter, episode_num, episode_key)
-                all_summaries.append(summary)
-
-                print(f"Episode {episode_num + 1} summary:")
-                print(f"  Total reward: {summary['total_reward']:.1f}")
-                print(f"  Rewards collected: {summary['rewards_collected']}")
-                print(f"  Coverage: {summary['coverage']:.1%}")
-
-            return {"episodes": all_summaries}
-
-    def _run_one_episode(
-        self, exporter: DataExporter, episode_num: int, key: random.PRNGKey
-    ) -> Dict[str, Any]:
-        """Run a single episode with random actions and log to exporter."""
-        reset_key, action_key = random.split(key)
-        state, obs = self.world.reset(reset_key)
-
-        exporter.start_episode(episode_num)
-        exporter.log_static_episode_data(
-            "world_setup", {"reward_positions": np.array(state.reward_positions)}
+        self.exporter = exporter
+        
+        # Internal state - we'll collect data in the episode buffer
+        self.episode_buffer = None
+        self.log_timestep_fn = None
+        self.current_timestep = 0
+    
+    def reset(self, key: PRNGKey) -> None:
+        """Reset agent's internal state for new episode."""
+        self.current_timestep = 0
+    
+    @staticmethod
+    @jax.jit
+    def _act_pure(gradient: Array, key: PRNGKey) -> Array:
+        """Pure JAX action selection."""
+        # Random action selection
+        action = randint(key, (), 0, 9)
+        return action
+    
+    def act(self, gradient: Array, key: PRNGKey) -> Array:
+        """Select random action based on gradient observation.
+        
+        Args:
+            gradient: float32 scalar in [0, 1], distance signal to nearest reward
+            key: JAX random key for stochastic action selection
+            
+        Returns:
+            action: Array scalar int32 0-8 encoding movement and rotation
+        """
+        # Use JIT-compiled pure function
+        action = self._act_pure(gradient, key)
+        
+        # Track timestep for buffer management
+        self.current_timestep += 1
+        
+        return action
+    
+    def get_episode_data(self) -> EpisodeData:
+        """Get standardized episode data for logging after episode ends."""
+        # The episode buffer contains all the data
+        # Extract what we need for EpisodeData
+        if self.episode_buffer is not None:
+            # Get data up to current timestep
+            actions = self.episode_buffer.actions[:self.current_timestep]
+            gradients = self.episode_buffer.gradients[:self.current_timestep]
+            
+            # Count reward events
+            reward_count = jnp.sum(gradients == 1.0)
+        else:
+            # No episode run yet
+            actions = jnp.array([], dtype=jnp.int32)
+            gradients = jnp.array([], dtype=jnp.float32)
+            reward_count = 0
+        
+        return EpisodeData(
+            actions=actions,
+            gradients=gradients,
+            # No neural data for random agent
+            neural_states=None,
+            spikes=None,
+            # No weight data
+            weights_initial=None,
+            weights_final=None,
+            weight_changes=None,
+            # No learning signals
+            eligibility_traces=None,
+            dopamine_levels=None,
+            # Performance metrics
+            total_reward_events=int(reward_count),
+            exploration_entropy=None  # Could compute action entropy if needed
         )
-
-        # Convert JAX array to a hashable tuple of Python ints
-        unique_positions = {tuple(int(p) for p in state.agent_pos)}
-
-        for step in range(self.config.n_steps):
-            action_key, subkey = random.split(action_key)
-            action = int(random.randint(subkey, (), 0, 4))
-
-            result = self.world.step(state, action)
-            state = result.state
-            obs = result.observation
-
-            # Convert JAX array to a hashable tuple of Python ints
-            unique_positions.add(tuple(int(p) for p in state.agent_pos))
-
-            if self.config.export_full_trajectory:
-                exporter.log(
-                    timestep=step,
-                    behavior={
-                        "pos_x": int(state.agent_pos[0]),
-                        "pos_y": int(state.agent_pos[1]),
-                        "action": action,
-                        "gradient": float(obs.gradient),
-                    },
-                    reward=float(result.reward),
-                )
-
-            if result.done:
-                break
-
-        rewards_collected = int(jnp.sum(state.reward_collected))
-        coverage = len(unique_positions) / (self.config.world_config.grid_size**2)
-
-        episode_summary = {
-            "total_reward": float(state.total_reward),
-            "rewards_collected": rewards_collected,
-            "steps_taken": state.timestep,
-            "coverage": coverage,
-            "final_position": [int(p) for p in state.agent_pos],
-            "all_rewards_collected": bool(jnp.all(state.reward_collected)),
-        }
-
-        exporter.end_episode(success=bool(jnp.all(state.reward_collected)), summary=episode_summary)
-
-        return episode_summary
+    
+    def start_episode(self, episode_id: int) -> Tuple:
+        """Start new episode and get buffer and logging function from exporter."""
+        self.episode_buffer, self.log_timestep_fn = self.exporter.start_episode(episode_id)
+        self.current_timestep = 0
+        return self.episode_buffer, self.log_timestep_fn

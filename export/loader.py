@@ -45,40 +45,71 @@ class ExperimentLoader:
         return dict(self.h5_file.attrs)
 
     def get_config(self) -> Dict[str, Any]:
-        """Get experiment configuration."""
-        config = {}
+        """Get experiment configuration from HDF5 or JSON file.
+        
+        First tries HDF5 (faster), then falls back to JSON file.
+        """
+        # Try HDF5 first
         if "config" in self.h5_file and isinstance(self.h5_file["config"], h5py.Group):
             config_group = self.h5_file["config"]
-            for key in config_group:
-                value_dataset = config_group[key]
-                if isinstance(value_dataset, h5py.Dataset):
-                    value = value_dataset[()]
-                    if isinstance(value, bytes):  # Handle compressed/binary data if necessary
-                        try:
-                            decompressed = zlib.decompress(value)
-                            config[key] = json.loads(decompressed.decode("utf-8"))
-                        except (zlib.error, json.JSONDecodeError, UnicodeDecodeError):
-                            config[key] = value  # Store as bytes if not decodable JSON
-                    else:
+            config = {}
+            # Read from attrs (more efficient than datasets for small data)
+            for key, value in config_group.attrs.items():
+                if isinstance(value, str) and value.startswith('{'):
+                    # JSON-encoded complex type
+                    try:
+                        config[key] = json.loads(value)
+                    except json.JSONDecodeError:
                         config[key] = value
-        return config
+                else:
+                    config[key] = value
+            return config
+        
+        # Fallback to JSON file
+        config_path = self.h5_path.parent / "config.json"
+        if config_path.exists():
+            with open(config_path, "r") as f:
+                return json.load(f)
+        
+        return {}
 
-    def get_network_structure(self) -> Dict[str, Dict[str, np.ndarray]]:
+    def get_network_structure(self) -> Dict[str, Any]:
         """Get network structure data."""
         if "network_structure" not in self.h5_file or not isinstance(
             self.h5_file["network_structure"], h5py.Group
         ):
             return {}
         net_group = self.h5_file["network_structure"]
-        structure: Dict[str, Dict[str, np.ndarray]] = {}
-        for key in ["neurons", "connections", "initial_weights"]:
+        structure: Dict[str, Any] = {}
+        
+        # Load neurons and connections groups
+        for key in ["neurons", "connections"]:
             if key in net_group and isinstance(net_group[key], h5py.Group):
                 sub_group = net_group[key]
-                structure[key] = {
+                structure[key] = {}
+                for ds_key in sub_group:
+                    ds = sub_group[ds_key]
+                    if isinstance(ds, h5py.Dataset):
+                        # Decode string arrays if needed
+                        if ds.dtype.kind == 'S' or ds.dtype.kind == 'O':
+                            structure[key][ds_key] = np.array([s.decode('utf-8') if isinstance(s, bytes) else s for s in ds[:]])
+                        else:
+                            structure[key][ds_key] = ds[:]
+        
+        # Handle initial_weights - can be either a group or a dataset
+        if "initial_weights" in net_group:
+            iw = net_group["initial_weights"]
+            if isinstance(iw, h5py.Group):
+                # Dict format
+                structure["initial_weights"] = {
                     ds_key: ds[:]
-                    for ds_key, ds in sub_group.items()
+                    for ds_key, ds in iw.items()
                     if isinstance(ds, h5py.Dataset)
                 }
+            elif isinstance(iw, h5py.Dataset):
+                # Direct array format
+                structure["initial_weights"] = iw[:]
+                
         return structure
 
     def list_episodes(self) -> List[int]:
@@ -109,6 +140,50 @@ class ExperimentLoader:
                 f"Episode {episode_id} ({episode_name}) not found or is not a valid group."
             )
         return EpisodeData(episodes_group[episode_name])
+    
+    def list_checkpoints(self) -> List[str]:
+        """List all available checkpoints."""
+        if "checkpoints" not in self.h5_file or not isinstance(
+            self.h5_file["checkpoints"], h5py.Group
+        ):
+            return []
+        return sorted(self.h5_file["checkpoints"].keys())
+    
+    def get_checkpoint(self, name: str) -> Dict[str, Any]:
+        """Load a specific checkpoint."""
+        if "checkpoints" not in self.h5_file:
+            raise KeyError("No checkpoints found")
+        
+        ckpt_group = self.h5_file["checkpoints"].get(name)
+        if not isinstance(ckpt_group, h5py.Group):
+            raise KeyError(f"Checkpoint '{name}' not found")
+        
+        checkpoint = {}
+        # Load attributes
+        for key, value in ckpt_group.attrs.items():
+            if isinstance(value, str) and (value.startswith('[') or value.startswith('{')):
+                try:
+                    checkpoint[key] = json.loads(value)
+                except json.JSONDecodeError:
+                    checkpoint[key] = value
+            else:
+                checkpoint[key] = value
+        
+        # Load datasets and subgroups
+        for key in ckpt_group:
+            item = ckpt_group[key]
+            if isinstance(item, h5py.Dataset):
+                checkpoint[key] = item[:]
+            elif isinstance(item, h5py.Group):
+                # Load nested group
+                checkpoint[key] = {}
+                for subkey, subvalue in item.attrs.items():
+                    checkpoint[key][subkey] = subvalue
+                for subkey in item:
+                    if isinstance(item[subkey], h5py.Dataset):
+                        checkpoint[key][subkey] = item[subkey][:]
+        
+        return checkpoint
 
     def close(self) -> None:
         """Close HDF5 file."""
@@ -133,116 +208,132 @@ class EpisodeData:
     def get_neural_states(
         self, start: Optional[int] = None, stop: Optional[int] = None
     ) -> Dict[str, np.ndarray]:
+        """Get all neural state data from the episode."""
         neural_states_group = self.episode_group.get("neural_states")
         if not isinstance(neural_states_group, h5py.Group):
-            return {}
+            return {"timesteps": np.array([])}  # Return empty but valid structure
 
         states: Dict[str, np.ndarray] = {}
-        for dset_name in ["membrane_potential", "spikes", "timesteps"]:
-            dataset = neural_states_group.get(dset_name)
+        # Read all datasets in the group, not just hardcoded names
+        for key in neural_states_group:
+            dataset = neural_states_group[key]
             if isinstance(dataset, h5py.Dataset):
                 if start is not None and stop is not None:
-                    states[dset_name] = dataset[start:stop]
+                    states[key] = dataset[start:stop]
                 else:
-                    states[dset_name] = dataset[:]
+                    states[key] = dataset[:]
         return states
 
     def get_behavior(self) -> Dict[str, np.ndarray]:
+        """Get all behavior data from the episode."""
         behavior_group = self.episode_group.get("behavior")
         if not isinstance(behavior_group, h5py.Group):
-            return {}
+            return {"timesteps": np.array([])}  # Return empty but valid structure
 
         behavior_data: Dict[str, np.ndarray] = {}
-        for dset_name in ["timesteps", "position", "action", "rewards"]:
-            dataset = behavior_group.get(dset_name)
+        # Read all datasets in the group
+        for key in behavior_group:
+            dataset = behavior_group[key]
             if isinstance(dataset, h5py.Dataset):
-                behavior_data[dset_name] = dataset[:]
+                behavior_data[key] = dataset[:]
         return behavior_data
 
-    def get_static_data(self, name: str) -> Dict[str, np.ndarray]:
+    def get_static_data(self, name: str) -> Dict[str, Any]:
+        """Get static data, handling scalars and arrays properly."""
         static_group = self.episode_group.get(name)
         if not isinstance(static_group, h5py.Group):
             return {}
 
-        data: Dict[str, np.ndarray] = {}
-        for key in static_group:  # Iterate directly over keys if it's a group
-            if not isinstance(key, str):  # Ensure key is a string
-                continue
-            item = static_group.get(key)
+        data: Dict[str, Any] = {}
+        for key in static_group:
+            item = static_group[key]
             if isinstance(item, h5py.Dataset):
-                data[key] = item[:]
+                # Handle scalar datasets
+                if item.shape == ():
+                    value = item[()]  # Use [()] for scalar access
+                    # Decode bytes to string if needed
+                    if isinstance(value, bytes):
+                        data[key] = value.decode('utf-8')
+                    else:
+                        data[key] = value
+                else:
+                    # Array data
+                    data[key] = item[:]
         return data
 
     def get_events(self) -> List[Dict[str, Any]]:
+        """Get all events from the episode."""
         events_group = self.episode_group.get("events")
         if not isinstance(events_group, h5py.Group):
             return []
 
         events_list: List[Dict[str, Any]] = []
-        for event_name in events_group:  # Iterate directly over member names (keys)
-            if not isinstance(event_name, str):  # Ensure key is a string
-                continue
-            event_item = events_group.get(event_name)
-            if isinstance(event_item, h5py.Dataset):
-                event_data: Dict[str, Any] = {"name": event_name, "data": event_item[:]}
-                # Update with attributes using dict constructor for clarity if preferred, or keep as is
-                event_data.update(dict(event_item.attrs.items()))
+        for event_name in sorted(events_group.keys()):  # Sort by timestamp in name
+            event_item = events_group[event_name]
+            if isinstance(event_item, h5py.Group):
+                # Extract event data from group attributes
+                event_data: Dict[str, Any] = {
+                    "name": event_item.attrs.get("name", event_name),
+                    "timestep": event_item.attrs.get("timestep", 0),
+                    "data": {}
+                }
+                # Get all other attributes as data
+                for key, value in event_item.attrs.items():
+                    if key not in ["name", "timestep"]:
+                        event_data["data"][key] = value
                 events_list.append(event_data)
         return events_list
 
     def get_weight_changes(self) -> Dict[str, np.ndarray]:
-        wc_group = self.episode_group.get("weight_changes")
-        if not isinstance(wc_group, h5py.Group):
+        """Get weight change data from the plasticity group."""
+        # Weight changes are stored in the plasticity group
+        plasticity_group = self.episode_group.get("plasticity")
+        if not isinstance(plasticity_group, h5py.Group):
             return {}
 
         changes: Dict[str, np.ndarray] = {}
-        for key in wc_group:  # Iterate directly over keys
-            if not isinstance(key, str):  # Ensure key is a string
-                continue
-            item = wc_group.get(key)
+        for key in plasticity_group:
+            item = plasticity_group[key]
             if isinstance(item, h5py.Dataset):
-                changes[key] = item[:]
+                if key == "learning_rules":
+                    # Decode string data
+                    changes[key] = np.array([s.decode('utf-8').strip() for s in item[:]])
+                else:
+                    changes[key] = item[:]
+        
+        # Calculate deltas if not already present
+        if "old_weights" in changes and "new_weights" in changes and "deltas" not in changes:
+            changes["deltas"] = changes["new_weights"] - changes["old_weights"]
+            
         return changes
-
+    
     def get_rewards(self) -> Dict[str, np.ndarray]:
-        """
-        Get reward events.
-        Returns a dictionary with 'timesteps' and 'values' for non-zero rewards.
-        If reward data is not found or no non-zero rewards exist, it returns
-        a dictionary with empty numpy arrays for 'timesteps' and 'values'.
-        """
-        empty_rewards = {"timesteps": np.array([], dtype=int), "values": np.array([], dtype=float)}
-
-        if not isinstance(self.episode_group, h5py.Group):
-            return empty_rewards
-
-        behavior_group = self.episode_group.get("behavior")
-        if not isinstance(behavior_group, h5py.Group):
-            return empty_rewards
-
-        rewards_dataset = behavior_group.get("rewards")
-        if not isinstance(rewards_dataset, h5py.Dataset):
-            return empty_rewards
-
-        try:
-            all_rewards_values = rewards_dataset[:]
-        except Exception:
-            return empty_rewards
-
-        if not isinstance(all_rewards_values, np.ndarray) or all_rewards_values.ndim == 0:
-            return empty_rewards
-
-        try:
-            if not np.issubdtype(all_rewards_values.dtype, np.number):
-                return empty_rewards
-            non_zero_indices = np.where(all_rewards_values > 0)[0]
-        except TypeError:
-            return empty_rewards
-
-        if non_zero_indices.size > 0:
-            return {
-                "timesteps": non_zero_indices.astype(int),
-                "values": all_rewards_values[non_zero_indices].astype(float),
-            }
-        else:
-            return empty_rewards
+        """Get reward data from the episode."""
+        rewards_group = self.episode_group.get("rewards")
+        if not isinstance(rewards_group, h5py.Group):
+            return {"timesteps": np.array([]), "values": np.array([])}
+        
+        rewards_data: Dict[str, np.ndarray] = {}
+        for key in rewards_group:
+            dataset = rewards_group[key]
+            if isinstance(dataset, h5py.Dataset):
+                rewards_data[key] = dataset[:]
+        return rewards_data
+    
+    def get_spikes(self) -> Dict[str, np.ndarray]:
+        """Get spike data from the episode."""
+        spikes_group = self.episode_group.get("spikes")
+        if not isinstance(spikes_group, h5py.Group):
+            # Try neural_states group as fallback
+            neural_states = self.get_neural_states()
+            if "spikes" in neural_states:
+                return {"timesteps": neural_states.get("timesteps", np.array([])), 
+                        "spikes": neural_states["spikes"]}
+            return {}
+        
+        spikes_data: Dict[str, np.ndarray] = {}
+        for key in spikes_group:
+            dataset = spikes_group[key]
+            if isinstance(dataset, h5py.Dataset):
+                spikes_data[key] = dataset[:]
+        return spikes_data

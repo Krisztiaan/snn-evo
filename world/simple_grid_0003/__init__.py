@@ -8,7 +8,7 @@ Just change your import:
     from simple_grid_0003 import SimpleGridWorld, WorldConfig
 """
 
-from world.simple_grid_0001.types import Observation, StepResult, WorldConfig, WorldState
+from .types import Observation, StepResult, WorldConfig, WorldState
 
 from .world import SimpleGridWorld
 

@@ -145,3 +145,37 @@ addopts = "-ra -q"
 testpaths = [
     "tests",
 ]
+
+[tool.pyright]
+# Python version and environment
+pythonVersion = "3.10"
+venvPath = "."
+venv = ".venv"
+
+# Type checking settings
+typeCheckingMode = "strict"
+reportMissingImports = false  # JAX and other deps may not be in pyright's env
+reportMissingTypeStubs = false
+reportPrivateImportUsage = false
+
+# Allow certain patterns
+reportUnknownParameterType = false
+reportUnknownArgumentType = false
+reportUnknownVariableType = false
+reportUnknownMemberType = false
+reportUnknownLambdaType = false
+
+# Strict settings we want to keep
+reportUntypedFunctionDecorator = true
+reportUntypedClassDecorator = true
+reportUntypedBaseClass = true
+reportInvalidTypeForm = true
+reportOptionalMemberAccess = true
+reportOptionalCall = true
+reportOptionalIterable = true
+reportOptionalContextManager = true
+reportOptionalOperand = true
+
+# Paths
+include = ["world", "models", "export", "tests"]
+exclude = ["**/__pycache__", "**/node_modules", "**/.venv", "build", "dist"]

@@ -9,7 +9,7 @@ and adds parameters for controlling detailed, step-by-step logging.
 
 from typing import NamedTuple
 
-from world.simple_grid_0001.types import WorldConfig  # Using standard config
+from world.simple_grid_0003.types import WorldConfig  # Using optimized world config
 
 
 class NetworkParams(NamedTuple):
@@ -134,6 +134,10 @@ class ExperimentConfig(NamedTuple):
 class SnnAgentConfig(NamedTuple):
     """Master configuration combining all components."""
 
-    world_config: WorldConfig = WorldConfig()
+    world_config: WorldConfig = WorldConfig(
+        grid_size=20,
+        n_rewards=12,  # 3% of 400 cells
+        max_timesteps=1000
+    )
     network_params: NetworkParams = NetworkParams()
     exp_config: ExperimentConfig = ExperimentConfig()
