@@ -64,11 +64,11 @@
                     </details>
                     {% endif %}
                     
-                    {% if exp.config.learning_rules %}
+                    {% if exp.config.plasticity %}
                     <details>
-                        <summary>Learning Rules</summary>
+                        <summary>Plasticity</summary>
                         <div class="config-content">
-                            {% for key, value in exp.config.learning_rules.items() %}
+                            {% for key, value in exp.config.plasticity.items() %}
                             <div class="config-item">
                                 <span class="config-key">{{ key }}:</span>
                                 <span class="config-value">{{ value }}</span>
@@ -93,7 +93,7 @@
                     {% endif %}
                     
                     {% for section_key, section_value in exp.config.items() %}
-                        {% if section_key not in ['neural', 'learning_rules', 'world'] and section_value is mapping %}
+                        {% if section_key not in ['neural', 'plasticity', 'world'] and section_value is mapping %}
                         <details>
                             <summary>{{ section_key | title }}</summary>
                             <div class="config-content">

@@ -382,6 +382,7 @@ class JaxDataExporter:
                     "min": np.min(rewards),
                     "max": np.max(rewards)
                 }
+            summary["episode_stats"] = self.episode_summaries  # Add this line to include episode details
             
             # Learning progress
             if len(rewards) >= 10:

@@ -5,6 +5,7 @@ logs
 node_modules
 dist
 experiments/**/*
+visualization/sci/runs
 
 .claude
 CLAUDE.md

@@ -6,6 +6,20 @@ import numpy as np
 import h5py
 
 
+def _get_nested(data, keys, default=None):
+    """Safely get a nested value from a dict or list."""
+    for key in keys:
+        try:
+            # Handle numeric indices for lists
+            if isinstance(data, list) and isinstance(key, int):
+                data = data[key]
+            else:
+                data = data[key]
+        except (KeyError, TypeError, IndexError):
+            return default
+    return data
+
+
 def parse_episode_data(episode_group: h5py.Group, episode_id: int) -> Dict[str, Any]:
     """Parses a single episode's data into a dict for JSON conversion."""
     # Load metadata
@@ -52,6 +66,9 @@ def parse_experiment(exp_path: Path) -> Optional[Dict[str, Any]]:
         
         # Open HDF5 file
         with h5py.File(data_file, 'r') as hf:
+            # FIX: Load root attributes from HDF5
+            root_attrs = dict(hf.attrs)
+            
             # Load network structure
             network = None
             if 'network_structure' in hf:
@@ -95,10 +112,20 @@ def parse_experiment(exp_path: Path) -> Optional[Dict[str, Any]]:
                 if episode_key in episodes_group:
                     episodes_data[episode_key] = parse_episode_data(episodes_group[episode_key], eid)
             
-            # Extract agent name from config
-            agent_name = config.get('agent_name', 'unknown')
+            # Extract agent name - try HDF5 attributes first, then config
+            agent_name = root_attrs.get('agent_name', config.get('agent_name', 'unknown'))
             if agent_name == 'unknown' and 'agent_version' in config:
                 agent_name = config['agent_version']
+            if agent_name == 'unknown' and 'model' in config:
+                agent_name = config['model']
+            if agent_name == 'unknown' and 'agent' in config:
+                agent_name = config['agent']
+            
+            # Calculate metrics from episode data
+            metrics = calculate_experiment_metrics({
+                'summary': summary,
+                'config': config
+            })
             
             return {
                 "name": exp_path.name,
@@ -107,7 +134,8 @@ def parse_experiment(exp_path: Path) -> Optional[Dict[str, Any]]:
                 "config": config,
                 "network": network,
                 "episodes": episodes_data,
-                "total_episodes": len(episode_ids)
+                "total_episodes": len(episode_ids),
+                "metrics": metrics
             }
             
     except Exception as e:

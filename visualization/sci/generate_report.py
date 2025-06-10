@@ -7,13 +7,41 @@ from typing import Dict, List, Any
 import numpy as np
 from jinja2 import Environment, FileSystemLoader
 
-from data_parser import get_all_experiment_data, calculate_experiment_metrics
+from data_parser import get_all_experiment_data, calculate_experiment_metrics, _get_nested
 
 
 # --- CONFIGURATION ---
 EXPERIMENTS_DIR = Path("../../experiments")
 OUTPUT_DIR = Path("./")
 TEMPLATE_DIR = Path("./templates")
+
+
+def prepare_header_stats(experiments):
+    """Calculate the high-level stats for the dashboard header."""
+    if not experiments:
+        return {
+            "total_experiments": 0,
+            "best_reward": {"value": 0, "name": "N/A"},
+            "agent_types": 0
+        }
+
+    total_experiments = len(experiments)
+    
+    best_reward_val = -np.inf
+    best_reward_name = "N/A"
+    for exp in experiments:
+        mean_reward = _get_nested(exp, ['summary', 'reward_stats', 'mean'], -np.inf)
+        if mean_reward > best_reward_val:
+            best_reward_val = mean_reward
+            best_reward_name = exp['name']
+
+    agent_types = len(set(exp.get('agent', 'unknown') for exp in experiments))
+
+    return {
+        "total_experiments": total_experiments,
+        "best_reward": {"value": f"{best_reward_val:.2f}", "name": best_reward_name},
+        "agent_types": agent_types
+    }
 
 
 def prepare_dashboard_data(experiments: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -47,20 +75,43 @@ def prepare_dashboard_data(experiments: List[Dict[str, Any]]) -> Dict[str, Any]:
                 'range': [min(values), max(values)] if values else [0, 1]
             })
     
-    # Add some common parameters if they exist
-    # Check if n_neurons exists in any experiment
-    if any('neural' in exp.get('config', {}) and 'n_neurons' in exp['config']['neural'] for exp in experiments):
+    # Add more comprehensive parameters
+    param_keys = [
+        ('N Neurons', 'config.neural.n_neurons'),
+        ('Connection Prob', 'config.neural.connection_probability'),
+        ('Excitatory Ratio', 'config.neural.excitatory_ratio'),
+        ('STDP Potentiation LR', 'config.plasticity.stdp_lr_potentiation'),
+        ('STDP Depression LR', 'config.plasticity.stdp_lr_depression'),
+        ('Homeostasis LR', 'config.plasticity.homeostasis_lr'),
+        ('Dopamine Boost', 'config.plasticity.dopamine_reward_boost'),
+        ('Grid Size', 'config.world.grid_size'),
+        ('Max Timesteps', 'config.world.max_timesteps')
+    ]
+
+    for label, path in param_keys:
         values = []
+        path_keys = path.split('.')
         for exp in experiments:
-            n_neurons = 0
-            if 'neural' in exp.get('config', {}) and 'n_neurons' in exp['config']['neural']:
-                n_neurons = exp['config']['neural']['n_neurons']
-            values.append(n_neurons)
-        dimensions.append({
-            'label': 'N Neurons',
-            'values': values,
-            'range': [min(values), max(values)]
-        })
+            value = exp
+            try:
+                for key in path_keys:
+                    # Handle both dicts and objects with attributes
+                    if isinstance(value, dict):
+                        value = value[key]
+                    else:
+                        value = getattr(value, key)
+                values.append(float(value))
+            except (KeyError, AttributeError, TypeError):
+                # If a parameter doesn't exist for an experiment, use 0
+                values.append(0)
+        
+        # Only add the dimension if it has non-zero values
+        if any(v != 0 for v in values):
+            dimensions.append({
+                'label': label,
+                'values': values,
+                'range': [min(values), max(values)] if values else [0, 1]
+            })
     
     # Data for box plot (reward distributions)
     box_data = []
@@ -152,22 +203,18 @@ def main():
     all_experiments.sort(key=lambda x: x['metrics']['avg_reward'], reverse=True)
     
     # 5. Calculate dashboard statistics
-    best_reward = max(exp['metrics']['avg_reward'] for exp in all_experiments)
-    best_experiment = next(exp['name'] for exp in all_experiments 
-                          if exp['metrics']['avg_reward'] == best_reward)
-    agent_types = list(set(exp['agent'] for exp in all_experiments))
+    print("📊 Calculating dashboard statistics...")
+    header_stats = prepare_header_stats(all_experiments)
+    dashboard_plot_data = prepare_dashboard_data(all_experiments)
     
     # 6. Generate dashboard
     print("📝 Generating dashboard...")
-    dashboard_plot_data = prepare_dashboard_data(all_experiments)
     
     dashboard_html = dashboard_template.render(
         experiments=all_experiments,
         experiments_json=json.dumps(all_experiments),
-        plot_data=json.dumps(dashboard_plot_data),
-        best_reward=best_reward,
-        best_experiment=best_experiment,
-        agent_types=agent_types,
+        plots_data=json.dumps(dashboard_plot_data),  # Use the new prepare_dashboard_data result
+        header_stats=header_stats,
         generation_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         url_prefix=""
     )

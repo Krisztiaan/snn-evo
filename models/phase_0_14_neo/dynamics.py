@@ -12,10 +12,7 @@ from .config import DynamicsConfig, InputConfig, NetworkConfig
 
 
 def neuron_dynamics_step(
-    state: NeoAgentState,
-    key: random.PRNGKey,
-    config: DynamicsConfig,
-    network_config: NetworkConfig
+    state: NeoAgentState, key: random.PRNGKey, config: DynamicsConfig, network_config: NetworkConfig
 ) -> NeoAgentState:
     """Single step of neural dynamics with LIF neurons (fully vectorized)."""
     n_neurons = state.v.shape[0]
@@ -67,13 +64,15 @@ def neuron_dynamics_step(
     # 8. Update firing rate (slow moving average)
     rate_tau = 1000.0
     rate_alpha = 1.0 / rate_tau
-    firing_rate = state.firing_rate * (1 - rate_alpha) + spike.astype(jnp.float32) * rate_alpha * 1000.0
-    
+    firing_rate = (
+        state.firing_rate * (1 - rate_alpha) + spike.astype(jnp.float32) * rate_alpha * 1000.0
+    )
+
     # 9. Update motor trace from readout spikes
     readout_start = network_config.num_sensory + network_config.num_processing
     readout_end = readout_start + 6  # We only use 6 motor neurons
     readout_spikes = spike[readout_start:readout_end].astype(jnp.float32)
-    
+
     tau_decay = jnp.exp(-1.0 / config.motor_tau)
     motor_trace = state.motor_trace * tau_decay + readout_spikes * 10.0
 
@@ -86,32 +85,29 @@ def neuron_dynamics_step(
         trace_pre=trace_pre,
         trace_post=trace_post,
         firing_rate=firing_rate,
-        motor_trace=motor_trace
+        motor_trace=motor_trace,
     )
 
 
 def encode_input(
-    gradient: float,
-    key: random.PRNGKey,
-    config: InputConfig,
-    n_channels: int
+    gradient: float, key: random.PRNGKey, config: InputConfig, n_channels: int
 ) -> jnp.ndarray:
     """Encode gradient value into input channels."""
     # Create tuning curves for each channel
     # Channels are tuned to different gradient values
     preferred_values = jnp.linspace(0, 1, n_channels)
-    
+
     # Gaussian tuning curves
     distances = jnp.abs(preferred_values - gradient)
     responses = jnp.exp(-0.5 * (distances / config.input_tuning_width) ** 2)
-    
+
     # Scale by input gain
     responses = responses * config.input_gain
-    
+
     # Add noise
     noise = random.normal(key, (n_channels,)) * config.input_noise
     responses = jnp.maximum(0, responses + noise)
-    
+
     return responses
 
 
@@ -119,10 +115,10 @@ def decode_action(
     state: NeoAgentState,
     key: random.PRNGKey,
     dynamics_config: DynamicsConfig,
-    network_config: NetworkConfig
+    network_config: NetworkConfig,
 ) -> Tuple[int, jnp.ndarray]:
     """Decode an action from a unified pool of 6 motor neurons.
-    
+
     Motor neurons vote for actions:
     - 0: FWD_LEFT
     - 1: FWD
@@ -152,7 +148,7 @@ def decode_action(
     #   Agent 3 -> World 6: LEFT (pure rotation)
     #   Agent 4 -> World 8: STAY
     #   Agent 5 -> World 2: RIGHT (pure rotation)
-    
+
     # Create mapping array
     action_map = jnp.array([7, 0, 1, 6, 8, 2])
     world_action = action_map[action_choice]
@@ -161,20 +157,18 @@ def decode_action(
 
 
 def decode_action_from_trace(
-    state: NeoAgentState,
-    key: random.PRNGKey,
-    dynamics_config: DynamicsConfig
+    state: NeoAgentState, key: random.PRNGKey, dynamics_config: DynamicsConfig
 ) -> int:
     """Statelessly selects an action based on the current motor trace.
-    
+
     This is used after the integration window to decode the final action.
     """
     # Use softmax with temperature for stochastic action selection
     logits = state.motor_trace / state.action_temperature
     action_choice = random.categorical(key, logits)  # Result: an integer from 0 to 5
-    
+
     # Direct mapping to world actions
     action_map = jnp.array([7, 0, 1, 6, 8, 2])
     world_action = action_map[action_choice]
-    
+
     return world_action

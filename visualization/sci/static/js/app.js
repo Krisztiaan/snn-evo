@@ -1,492 +1,285 @@
-// keywords: [visualization, javascript, plotly, cytoscape, interactive, dashboard]
+// keywords: [plotly visualization, cytoscape network, dashboard analytics, episode playback]
 
-// Global state
-let currentEpisodeData = null;
-let playbackInterval = null;
-let currentTimestep = 0;
-
-// Initialize on DOM ready
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('SNN Analytics loaded');
-    
-    // Check which page we are on by seeing what data is available
-    if (typeof experimentsData !== 'undefined') {
+document.addEventListener('DOMContentLoaded', () => {
+    // --- Dashboard Page Logic ---
+    if (document.getElementById('experiments-table')) {
         initDashboard();
     }
-    if (typeof runData !== 'undefined') {
+
+    // --- Run Detail Page Logic ---
+    if (document.getElementById('run-detail-container')) {
         initRunDetail();
     }
 });
 
-// =============================================================================
-// Dashboard Functions
-// =============================================================================
+
+// =================================================================================
+// DASHBOARD PAGE
+// =================================================================================
 
 function initDashboard() {
-    console.log('Initializing dashboard view...');
-    
-    // Initialize parallel coordinates plot
-    if (plotData && plotData.parallel_coords) {
-        const trace = {
-            type: 'parcoords',
-            line: plotData.parallel_coords.line,
-            dimensions: plotData.parallel_coords.dimensions.map(dim => ({
-                label: dim.label,
-                values: dim.values,
-                range: dim.range
-            }))
-        };
-        
-        const layout = {
-            title: 'Parameter-Performance Relationships',
-            paper_bgcolor: 'rgba(0,0,0,0)',
-            plot_bgcolor: 'rgba(0,0,0,0)',
-            font: { size: 12 }
-        };
-        
-        Plotly.newPlot('parallel-plot', [trace], layout, {responsive: true});
+    // Initialize DataTable
+    if (typeof DataTable !== 'undefined') {
+        new DataTable('#experiments-table');
     }
-}
-
-function initScatterPlot() {
-    // Create scatter plot matrix for selected metrics
-    const metrics = ['avg_reward', 'n_neurons', 'learning_progress'];
-    const data = [];
     
-    // Extract values for each metric
-    const values = {};
-    metrics.forEach(metric => {
-        values[metric] = experimentsData.map(exp => {
-            if (metric === 'n_neurons') {
-                return exp.config.neural.n_neurons;
-            } else {
-                return exp.metrics[metric];
+    // Attach tab event listeners
+    document.querySelectorAll('.analysis-container .tab-button').forEach(button => {
+        button.addEventListener('click', (e) => {
+            const tabName = e.target.getAttribute('data-tab');
+            
+            // Hide all tabs
+            document.querySelectorAll('.analysis-container .tab-content').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.analysis-container .tab-button').forEach(btn => btn.classList.remove('active'));
+            
+            // Show selected tab
+            document.getElementById(tabName).classList.add('active');
+            e.target.classList.add('active');
+
+            // Initialize plot on first view
+            if (tabName === 'parallel-coordinates' && !window.parallelInitialized) {
+                initParallelCoords();
+                window.parallelInitialized = true;
+            } else if (tabName === 'scatter-matrix' && !window.scatterInitialized) {
+                initScatterMatrix();
+                window.scatterInitialized = true;
+            } else if (tabName === 'reward-distribution' && !window.rewardDistInitialized) {
+                initRewardDistribution();
+                window.rewardDistInitialized = true;
             }
         });
     });
+
+    // Trigger click on the first tab to initialize it
+    const firstTab = document.querySelector('.analysis-container .tab-button.active');
+    if (firstTab) firstTab.click();
+}
+
+function initParallelCoords() {
+    // Fix: Use correct element ID and check for plotsData (not plotData)
+    const container = document.getElementById('parallel-coord-plot');
+    if (!container) return;
     
-    // Create scatter plots for each pair
-    for (let i = 0; i < metrics.length; i++) {
-        for (let j = 0; j < metrics.length; j++) {
-            if (i !== j) {
-                data.push({
-                    x: values[metrics[j]],
-                    y: values[metrics[i]],
-                    mode: 'markers',
-                    marker: {
-                        size: 8,
-                        color: values['avg_reward'],
-                        colorscale: 'Viridis',
-                        showscale: i === 0 && j === 1
-                    },
-                    text: experimentsData.map(exp => exp.name),
-                    hovertemplate: '%{text}<br>X: %{x}<br>Y: %{y}<extra></extra>',
-                    xaxis: 'x' + (j + 1),
-                    yaxis: 'y' + (i + 1),
-                    showlegend: false
-                });
-            }
-        }
+    if (!plotsData || !plotsData.parallel_coords || !plotsData.parallel_coords.dimensions || !plotsData.parallel_coords.dimensions.length) {
+        container.innerHTML = '<p class="plot-placeholder">No data available for parallel coordinates plot.</p>';
+        return;
     }
-    
+    const trace = {
+        type: 'parcoords',
+        line: plotsData.parallel_coords.line,
+        dimensions: plotsData.parallel_coords.dimensions
+    };
     const layout = {
-        title: 'Metrics Correlation Matrix',
-        grid: {
-            rows: metrics.length,
-            columns: metrics.length,
-            pattern: 'independent'
-        },
-        height: 600
+        title: 'Experiment Parameter & Result Comparison',
+        margin: {t: 50, l: 50, r: 50, b: 50}
     };
+    Plotly.newPlot(container, [trace], layout);
+}
+
+function initScatterMatrix() {
+    const container = document.getElementById('scatter-plot');
+    if (!container) return;
     
-    // Add axis labels
-    metrics.forEach((metric, i) => {
-        layout['xaxis' + (i + 1)] = { title: metric.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()) };
-        layout['yaxis' + (i + 1)] = { title: metric.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()) };
-    });
-    
-    Plotly.newPlot('scatter-plot', data, layout, {responsive: true});
-}
-
-function initBoxPlot() {
-    if (plotData && plotData.box_plot) {
-        const layout = {
-            title: 'Reward Distribution Across Experiments',
-            yaxis: { title: 'Total Reward' },
-            xaxis: { title: 'Experiment' },
-            showlegend: false
-        };
-        
-        Plotly.newPlot('boxplot-plot', plotData.box_plot, layout, {responsive: true});
-    }
-}
-
-// =============================================================================
-// Run Detail Functions
-// =============================================================================
-
-function initRunDetail() {
-    console.log('Initializing run detail view for:', runData.name);
-    // Tab initialization is handled by openTab function
-}
-
-function initProgressionPlots() {
-    if (!runData.summary.episode_stats || runData.summary.episode_stats.length === 0) {
-        console.warn('No episode stats available');
+    if (!plotsData || !plotsData.parallel_coords || !plotsData.parallel_coords.dimensions || plotsData.parallel_coords.dimensions.length < 2) {
+        container.innerHTML = '<p class="plot-placeholder">Not enough data for scatter matrix plot.</p>';
         return;
     }
     
-    const episodeStats = runData.summary.episode_stats;
-    const episodes = episodeStats.map(s => s.episode_id);
-    
-    // Reward progression
-    const rewards = episodeStats.map(s => s.total_reward || 0);
-    const rewardTrace = {
-        x: episodes,
-        y: rewards,
-        type: 'scatter',
-        mode: 'lines+markers',
-        name: 'Reward',
-        line: { color: '#3b82f6' }
-    };
-    
-    // Add moving average
-    const windowSize = Math.max(5, Math.floor(rewards.length / 20));
-    const movingAvg = rewards.map((val, idx) => {
-        const start = Math.max(0, idx - windowSize + 1);
-        const window = rewards.slice(start, idx + 1);
-        return window.reduce((a, b) => a + b, 0) / window.length;
-    });
-    
-    const avgTrace = {
-        x: episodes,
-        y: movingAvg,
-        type: 'scatter',
-        mode: 'lines',
-        name: `MA(${windowSize})`,
-        line: { color: '#ef4444', dash: 'dash' }
-    };
-    
-    Plotly.newPlot('reward-progression-plot', [rewardTrace, avgTrace], {
-        title: 'Reward per Episode',
-        xaxis: { title: 'Episode' },
-        yaxis: { title: 'Total Reward' }
-    }, {responsive: true});
-    
-    // Steps progression
-    const steps = episodeStats.map(s => s.steps || 0);
-    Plotly.newPlot('steps-progression-plot', [{
-        x: episodes,
-        y: steps,
-        type: 'scatter',
-        mode: 'lines+markers',
-        line: { color: '#10b981' }
-    }], {
-        title: 'Episode Length',
-        xaxis: { title: 'Episode' },
-        yaxis: { title: 'Steps' }
-    }, {responsive: true});
-    
-    // Action entropy (if available)
-    if (episodeStats[0].action_entropy !== undefined) {
-        const entropy = episodeStats.map(s => s.action_entropy || 0);
-        Plotly.newPlot('entropy-progression-plot', [{
-            x: episodes,
-            y: entropy,
-            type: 'scatter',
-            mode: 'lines+markers',
-            line: { color: '#f59e0b' }
-        }], {
-            title: 'Action Entropy',
-            xaxis: { title: 'Episode' },
-            yaxis: { title: 'Entropy' }
-        }, {responsive: true});
-    } else {
-        document.getElementById('entropy-progression-plot').style.display = 'none';
-    }
-    
-    // Neural activity (if available)
-    if (episodeStats[0].mean_activity !== undefined) {
-        const activity = episodeStats.map(s => s.mean_activity || 0);
-        Plotly.newPlot('activity-progression-plot', [{
-            x: episodes,
-            y: activity,
-            type: 'scatter',
-            mode: 'lines+markers',
-            line: { color: '#8b5cf6' }
-        }], {
-            title: 'Mean Neural Activity',
-            xaxis: { title: 'Episode' },
-            yaxis: { title: 'Mean Activity' }
-        }, {responsive: true});
-    } else {
-        document.getElementById('activity-progression-plot').style.display = 'none';
-    }
-}
-
-function initPlayback() {
-    // Load first episode
-    const firstEpisode = Object.keys(runData.episodes)[0];
-    if (firstEpisode) {
-        loadEpisode(firstEpisode);
-    }
-}
-
-function loadEpisode(episodeId) {
-    console.log('Loading episode:', episodeId);
-    currentEpisodeData = runData.episodes[episodeId];
-    
-    if (!currentEpisodeData) {
-        console.error('Episode data not found:', episodeId);
-        return;
-    }
-    
-    // Reset playback
-    stopPlayback();
-    currentTimestep = 0;
-    
-    // Update slider
-    const slider = document.getElementById('timestep-slider');
-    slider.max = currentEpisodeData.timesteps.length - 1;
-    slider.value = 0;
-    
-    // Initialize visualizations
-    initRewardTimeline();
-    updatePlayback(0);
-}
-
-function initRewardTimeline() {
-    if (!currentEpisodeData) return;
-    
-    // Create timeline showing when rewards were collected
-    const rewardTimesteps = [];
-    const rewardValues = [];
-    
-    currentEpisodeData.rewards.forEach((reward, idx) => {
-        if (reward > 0) {
-            rewardTimesteps.push(idx);
-            rewardValues.push(reward);
-        }
-    });
+    // For now, create a simple scatter plot of first two dimensions
+    const dim1 = plotsData.parallel_coords.dimensions[0];
+    const dim2 = plotsData.parallel_coords.dimensions[1];
     
     const trace = {
-        x: currentEpisodeData.timesteps,
-        y: currentEpisodeData.rewards,
+        x: dim1.values,
+        y: dim2.values,
+        mode: 'markers',
         type: 'scatter',
-        mode: 'lines+markers',
-        name: 'Rewards',
-        line: { color: '#10b981', width: 2 },
-        marker: { size: 8 }
-    };
-    
-    const layout = {
-        title: 'Reward Timeline',
-        xaxis: { title: 'Timestep' },
-        yaxis: { title: 'Reward' },
-        height: 250
-    };
-    
-    Plotly.newPlot('reward-timeline', [trace], layout, {responsive: true});
-}
-
-function updatePlayback(timestep) {
-    if (!currentEpisodeData) return;
-    
-    timestep = parseInt(timestep);
-    currentTimestep = timestep;
-    
-    // Update timestep display
-    document.getElementById('timestep-display').textContent = 
-        `Step: ${timestep} / ${currentEpisodeData.timesteps.length - 1}`;
-    
-    // Update action and state info
-    document.getElementById('current-action').textContent = 
-        currentEpisodeData.actions[timestep] || '-';
-    document.getElementById('current-gradient').textContent = 
-        currentEpisodeData.gradients[timestep] || '0';
-    document.getElementById('current-reward').textContent = 
-        currentEpisodeData.rewards[timestep] || '0';
-    
-    // Update neural heatmap (if available)
-    if (currentEpisodeData.neural_states && currentEpisodeData.neural_states.length > 0) {
-        const sampling = currentEpisodeData.neural_states_sampling || 1;
-        const nearestIdx = Math.floor(timestep / sampling);
-        
-        if (nearestIdx < currentEpisodeData.neural_states.length) {
-            const neuralData = currentEpisodeData.neural_states[nearestIdx];
-            updateNeuralHeatmap(neuralData);
+        text: plotsData.parallel_coords.dimensions.map((d, i) => `Exp ${i}`),
+        marker: {
+            color: plotsData.parallel_coords.line.color,
+            colorscale: plotsData.parallel_coords.line.colorscale,
+            showscale: true
         }
-    }
-    
-    // Update action distribution
-    updateActionDistribution(timestep);
-    
-    // Update reward timeline marker
-    updateTimelineMarker(timestep);
-}
-
-function updateNeuralHeatmap(neuralData) {
-    // Reshape neural data for heatmap
-    const n_neurons = neuralData.length;
-    const rows = Math.ceil(Math.sqrt(n_neurons));
-    const cols = Math.ceil(n_neurons / rows);
-    
-    // Create 2D array
-    const z = [];
-    for (let i = 0; i < rows; i++) {
-        const row = [];
-        for (let j = 0; j < cols; j++) {
-            const idx = i * cols + j;
-            row.push(idx < n_neurons ? neuralData[idx] : 0);
-        }
-        z.push(row);
-    }
-    
-    const data = [{
-        z: z,
-        type: 'heatmap',
-        colorscale: 'Viridis',
-        showscale: true
-    }];
-    
+    };
     const layout = {
-        title: 'Neural Activity',
-        xaxis: { showticklabels: false },
-        yaxis: { showticklabels: false },
-        height: 250
+        title: `${dim1.label} vs ${dim2.label}`,
+        xaxis: { title: dim1.label },
+        yaxis: { title: dim2.label },
+        margin: {t: 50, l: 60, r: 50, b: 60}
     };
-    
-    Plotly.newPlot('neural-heatmap', data, layout, {responsive: true});
+    Plotly.newPlot(container, [trace], layout);
 }
 
-function updateActionDistribution(timestep) {
-    // Count actions up to current timestep
-    const actionCounts = {};
-    for (let i = 0; i <= timestep; i++) {
-        const action = currentEpisodeData.actions[i];
-        actionCounts[action] = (actionCounts[action] || 0) + 1;
-    }
+function initRewardDistribution() {
+    const container = document.getElementById('reward-dist-plot');
+    if (!container) return;
     
-    const actions = Object.keys(actionCounts).sort();
-    const counts = actions.map(a => actionCounts[a]);
-    
-    const data = [{
-        x: actions,
-        y: counts,
-        type: 'bar',
-        marker: { color: '#3b82f6' }
-    }];
-    
-    const layout = {
-        title: 'Action Distribution',
-        xaxis: { title: 'Action' },
-        yaxis: { title: 'Count' },
-        height: 250
-    };
-    
-    Plotly.newPlot('action-distribution', data, layout, {responsive: true});
-}
-
-function updateTimelineMarker(timestep) {
-    // Add vertical line at current timestep
-    const update = {
-        shapes: [{
-            type: 'line',
-            x0: timestep,
-            x1: timestep,
-            y0: 0,
-            y1: 1,
-            yref: 'paper',
-            line: {
-                color: '#ef4444',
-                width: 2,
-                dash: 'dot'
-            }
-        }]
-    };
-    
-    Plotly.relayout('reward-timeline', update);
-}
-
-function togglePlayback() {
-    if (playbackInterval) {
-        stopPlayback();
-    } else {
-        startPlayback();
-    }
-}
-
-function startPlayback() {
-    const btn = document.getElementById('play-pause-btn');
-    btn.textContent = '⏸ Pause';
-    
-    const speed = parseInt(document.getElementById('speed-control').value);
-    const delay = 1000 / speed;
-    
-    playbackInterval = setInterval(() => {
-        if (currentTimestep >= currentEpisodeData.timesteps.length - 1) {
-            stopPlayback();
-            return;
-        }
-        
-        currentTimestep++;
-        document.getElementById('timestep-slider').value = currentTimestep;
-        updatePlayback(currentTimestep);
-    }, delay);
-}
-
-function stopPlayback() {
-    if (playbackInterval) {
-        clearInterval(playbackInterval);
-        playbackInterval = null;
-    }
-    
-    const btn = document.getElementById('play-pause-btn');
-    btn.textContent = '▶ Play';
-}
-
-function initNetworkGraph() {
-    if (!runData.network || !runData.network.neurons) {
-        console.warn('No network data available');
+    if (!plotsData || !plotsData.box_plot || !plotsData.box_plot.length) {
+        container.innerHTML = '<p class="plot-placeholder">No reward distribution data available.</p>';
         return;
     }
+    const layout = {
+        title: 'Reward Distribution Across Experiments',
+        yaxis: {
+            title: 'Total Reward'
+        },
+        xaxis: {
+            tickangle: -45,
+            automargin: true
+        },
+        margin: {t: 50, l: 70, r: 50, b: 100}
+    };
+    Plotly.newPlot(container, plotsData.box_plot, layout);
+}
+
+
+// =================================================================================
+// RUN DETAIL PAGE
+// =================================================================================
+
+function initRunDetail() {
+    // Create playback state local to this function
+    const playbackState = {
+        isPlaying: false,
+        intervalId: null,
+        currentTimestep: 0,
+        currentEpisode: null,
+        speed: 50 // ms per frame
+    };
     
-    const elements = [];
-    const neurons = runData.network.neurons;
-    const connections = runData.network.connections;
+    // Store playback state globally for debugging
+    window.playbackState = playbackState;
     
-    // Add neurons as nodes
-    neurons.neuron_ids.forEach((id, i) => {
-        const neuronType = neurons.neuron_types[i];
-        const isExcitatory = neurons.is_excitatory[i];
-        
-        elements.push({
-            data: { 
-                id: `n${id}`,
-                label: `${id}`,
-                type: neuronType,
-                excitatory: isExcitatory
-            },
-            classes: `${neuronType} ${isExcitatory ? 'excitatory' : 'inhibitory'}`
+    // Attach event listeners for tab buttons (remove onclick from HTML)
+    document.querySelectorAll('.tab-button').forEach(button => {
+        button.addEventListener('click', (e) => {
+            // Get tab name from onclick attribute for backwards compatibility
+            const onclickAttr = e.target.getAttribute('onclick');
+            if (onclickAttr) {
+                const match = onclickAttr.match(/openTab\(event,\s*'([^']+)'\)/);
+                if (match) {
+                    openTab(e, match[1]);
+                }
+            }
         });
     });
     
-    // Add connections as edges (sample for performance)
-    const maxEdges = 1000;
-    const edgeStep = Math.ceil(connections.source_ids.length / maxEdges);
+    // Set initial tab content
+    openTab({ currentTarget: document.querySelector('.tab-button.active') }, 'summary');
+
+    // Define all functions inside initRunDetail scope
+    function initProgressionPlots() {
+    const stats = runData.summary.episode_stats || [];
+    if (!stats.length) {
+        document.getElementById('progression').innerHTML = '<p class="plot-placeholder">No episode statistics available for progression plots.</p>';
+        return;
+    }
+
+    const episodeIds = stats.map(s => s.episode_id);
     
-    for (let i = 0; i < connections.source_ids.length; i += edgeStep) {
+    // Reward Progression
+    Plotly.newPlot('reward-progression-plot', [{
+        x: episodeIds,
+        y: stats.map(s => s.total_reward),
+        mode: 'lines+markers',
+        name: 'Total Reward'
+    }], { 
+        title: 'Reward per Episode',
+        xaxis: { title: 'Episode' },
+        yaxis: { title: 'Total Reward' },
+        margin: {t: 40, l: 60, r: 30, b: 40}
+    });
+
+    // Steps Progression
+    Plotly.newPlot('steps-progression-plot', [{
+        x: episodeIds,
+        y: stats.map(s => s.steps || s.timesteps),
+        mode: 'lines+markers',
+        name: 'Steps'
+    }], { 
+        title: 'Steps per Episode',
+        xaxis: { title: 'Episode' },
+        yaxis: { title: 'Steps' },
+        margin: {t: 40, l: 60, r: 30, b: 40}
+    });
+
+    // Entropy Progression
+    Plotly.newPlot('entropy-progression-plot', [{
+        x: episodeIds,
+        y: stats.map(s => s.action_entropy),
+        mode: 'lines+markers',
+        name: 'Action Entropy'
+    }], { 
+        title: 'Action Entropy per Episode',
+        xaxis: { title: 'Episode' },
+        yaxis: { title: 'Entropy' },
+        margin: {t: 40, l: 60, r: 30, b: 40}
+    });
+
+    // Activity Progression
+    Plotly.newPlot('activity-progression-plot', [{
+        x: episodeIds,
+        y: stats.map(s => s.mean_neural_activity),
+        mode: 'lines+markers',
+        name: 'Mean Neural Activity'
+    }], { 
+        title: 'Mean Neural Activity per Episode',
+        xaxis: { title: 'Episode' },
+        yaxis: { title: 'Activity' },
+        margin: {t: 40, l: 60, r: 30, b: 40}
+    });
+    }
+
+    function initNetworkGraph() {
+    if (!runData.network || !runData.network.neurons.neuron_ids) {
+        document.getElementById('network').innerHTML = '<p class="plot-placeholder">No network structure data available.</p>';
+        return;
+    }
+
+    const elements = [];
+    // Neurons
+    for (let i = 0; i < runData.network.neurons.neuron_ids.length; i++) {
+        const id = runData.network.neurons.neuron_ids[i];
+        const type = runData.network.neurons.neuron_types[i];
+        let color, size;
+        switch (type) {
+            case 0: color = '#63b3ed'; size = 20; break; // Sensory
+            case 1: color = '#f6e05e'; size = 15; break; // Processing
+            case 2: color = '#f56565'; size = 20; break; // Motor
+            default: color = '#a0aec0'; size = 15;
+        }
         elements.push({
-            data: {
-                id: `e${i}`,
-                source: `n${connections.source_ids[i]}`,
-                target: `n${connections.target_ids[i]}`
+            group: 'nodes',
+            data: { 
+                id: `n${id}`, 
+                label: `${id}`,
+                type: type
+            },
+            style: {
+                'background-color': color,
+                'width': size,
+                'height': size,
+                'label': 'data(label)',
+                'font-size': '8px',
+                'text-valign': 'center',
+                'text-halign': 'center'
             }
         });
     }
-    
-    // Initialize Cytoscape
-    const cy = cytoscape({
+    // Connections
+    for (let i = 0; i < runData.network.connections.source_ids.length; i++) {
+        elements.push({
+            group: 'edges',
+            data: {
+                id: `e${i}`,
+                source: `n${runData.network.connections.source_ids[i]}`,
+                target: `n${runData.network.connections.target_ids[i]}`
+            }
+        });
+    }
+
+    // Initialize Cytoscape without layout (will be run when tab is shown)
+    window.cy = cytoscape({
         container: document.getElementById('network-graph'),
         elements: elements,
         style: [
@@ -494,97 +287,324 @@ function initNetworkGraph() {
                 selector: 'node',
                 style: {
                     'label': 'data(label)',
-                    'width': 20,
-                    'height': 20,
-                    'font-size': 8,
+                    'font-size': '8px',
                     'text-valign': 'center',
-                    'text-halign': 'center'
+                    'text-halign': 'center',
+                    'color': '#fff',
+                    'text-outline-width': 2,
+                    'text-outline-color': '#888'
                 }
             },
             {
-                selector: '.sensory',
-                style: {
-                    'background-color': '#10b981',
-                    'shape': 'diamond'
-                }
+                selector: 'node[type=0]',
+                style: { 'background-color': '#63b3ed', 'width': 20, 'height': 20 }
             },
             {
-                selector: '.processing',
-                style: {
-                    'background-color': '#3b82f6',
-                    'shape': 'ellipse'
-                }
+                selector: 'node[type=1]',
+                style: { 'background-color': '#f6e05e', 'width': 15, 'height': 15 }
             },
             {
-                selector: '.readout',
-                style: {
-                    'background-color': '#ef4444',
-                    'shape': 'rectangle'
-                }
-            },
-            {
-                selector: '.inhibitory',
-                style: {
-                    'border-width': 3,
-                    'border-color': '#6b7280'
-                }
+                selector: 'node[type=2]',
+                style: { 'background-color': '#f56565', 'width': 20, 'height': 20 }
             },
             {
                 selector: 'edge',
                 style: {
-                    'width': 0.5,
-                    'line-color': '#e5e7eb',
-                    'target-arrow-color': '#e5e7eb',
+                    'width': 1,
+                    'line-color': '#ccc',
+                    'target-arrow-color': '#ccc',
                     'target-arrow-shape': 'triangle',
                     'curve-style': 'bezier',
                     'opacity': 0.5
                 }
             }
-        ],
-        layout: {
-            name: 'cose',
-            nodeRepulsion: 400000,
-            idealEdgeLength: 100,
-            nodeOverlap: 20,
-            animate: true,
-            animationDuration: 500
+        ]
+    });
+    }
+
+    function initPlayback() {
+        // Event listeners
+        document.getElementById('episode-select').addEventListener('change', (e) => loadEpisode(e.target.value));
+        document.getElementById('timestep-slider').addEventListener('input', (e) => updatePlayback(parseInt(e.target.value)));
+        document.getElementById('play-pause-btn').addEventListener('click', togglePlayback);
+        document.getElementById('speed-control').addEventListener('input', (e) => {
+            playbackState.speed = 200 / parseInt(e.target.value);
+        });
+
+        // Load first episode
+        const firstEpisodeId = document.getElementById('episode-select').value;
+        if (firstEpisodeId) {
+            loadEpisode(firstEpisodeId);
         }
+        }
+
+    function loadEpisode(episodeId) {
+    playbackState.currentEpisode = runData.episodes[episodeId];
+    if (!playbackState.currentEpisode) {
+        console.error('Episode not found:', episodeId);
+        return;
+    }
+
+    stopPlayback();
+    playbackState.currentTimestep = 0;
+    
+    const slider = document.getElementById('timestep-slider');
+    slider.max = playbackState.currentEpisode.timesteps.length - 1;
+    slider.value = 0;
+    
+    // Initial plot renders
+    renderRewardTimeline();
+    renderActionDistribution();
+    updatePlayback(0);
+    }
+
+    function updatePlayback(timestep) {
+    playbackState.currentTimestep = parseInt(timestep);
+    const slider = document.getElementById('timestep-slider');
+    if (slider.value != timestep) slider.value = timestep;
+    
+    const episodeData = playbackState.currentEpisode;
+    if (!episodeData) return;
+
+    const totalSteps = episodeData.timesteps.length;
+    document.getElementById('timestep-display').textContent = `Step: ${timestep} / ${totalSteps - 1}`;
+
+    // Update Action & State panel
+    document.getElementById('current-action').textContent = episodeData.actions[timestep] || 0;
+    document.getElementById('current-gradient').textContent = (episodeData.gradients && episodeData.gradients[timestep] || 0).toFixed(3);
+    document.getElementById('current-reward').textContent = (episodeData.rewards[timestep] || 0).toFixed(2);
+    
+    // Update plots
+    updateRewardTimelineMarker();
+    renderNeuralHeatmap();
+    }
+
+    function renderRewardTimeline() {
+    const episodeData = playbackState.currentEpisode;
+    if (!episodeData) return;
+    
+    const trace = {
+        x: episodeData.timesteps,
+        y: episodeData.rewards,
+        mode: 'lines',
+        name: 'Reward',
+        line: { color: 'blue' }
+    };
+    const layout = {
+        title: 'Reward Timeline',
+        xaxis: { title: 'Timestep' },
+        yaxis: { title: 'Reward' },
+        shapes: [{
+            type: 'line',
+            x0: 0,
+            x1: 0,
+            y0: 0,
+            y1: 1,
+            yref: 'paper',
+            line: { color: 'red', width: 2 }
+        }],
+        margin: { l: 50, r: 30, t: 50, b: 40 }
+    };
+    Plotly.newPlot('reward-timeline', [trace], layout, {staticPlot: false});
+    }
+
+    function updateRewardTimelineMarker() {
+    const update = {
+        'shapes[0].x0': playbackState.currentTimestep,
+        'shapes[0].x1': playbackState.currentTimestep
+    };
+    Plotly.relayout('reward-timeline', update);
+    }
+
+    function renderNeuralHeatmap() {
+    const episodeData = playbackState.currentEpisode;
+    if (!episodeData.neural_states || !episodeData.neural_states.length) {
+        document.getElementById('neural-heatmap').innerHTML = '<p class="plot-placeholder">No neural state data.</p>';
+        return;
+    }
+    
+    const sampling = episodeData.neural_states_sampling || 1;
+    const sampledTimestep = Math.floor(playbackState.currentTimestep / sampling);
+
+    if (sampledTimestep >= episodeData.neural_states.length) return;
+
+    const activity = episodeData.neural_states[sampledTimestep];
+    const nNeurons = activity.length;
+    const side = Math.ceil(Math.sqrt(nNeurons));
+    const heatmap = new Array(side).fill(0).map(() => new Array(side).fill(0));
+    
+    for (let i = 0; i < nNeurons; i++) {
+        const row = Math.floor(i / side);
+        const col = i % side;
+        heatmap[row][col] = activity[i];
+    }
+
+    const trace = {
+        z: heatmap,
+        type: 'heatmap',
+        colorscale: 'Viridis',
+        showscale: true
+    };
+    const layout = {
+        title: 'Neural Activity Heatmap',
+        xaxis: { visible: false },
+        yaxis: { visible: false },
+        margin: { l: 30, r: 30, t: 50, b: 30 }
+    };
+    Plotly.newPlot('neural-heatmap', [trace], layout);
+    }
+
+    function renderActionDistribution() {
+    const episodeData = playbackState.currentEpisode;
+    if (!episodeData) return;
+    
+    const actionLabels = ['Up', 'Down', 'Left', 'Right', 'Stay', 'A5', 'A6', 'A7', 'A8'];
+    const counts = new Array(9).fill(0);
+    episodeData.actions.forEach(a => { 
+        if (a >= 0 && a < 9) counts[a]++; 
     });
     
-    // Store reference for controls
-    window.networkCy = cy;
-}
+    const trace = {
+        x: actionLabels.slice(0, Math.max(...episodeData.actions) + 1),
+        y: counts.slice(0, Math.max(...episodeData.actions) + 1),
+        type: 'bar',
+        marker: { color: 'lightblue' }
+    };
+    const layout = {
+        title: 'Action Distribution',
+        xaxis: { title: 'Action' },
+        yaxis: { title: 'Count' },
+        margin: { l: 50, r: 30, t: 50, b: 60 }
+    };
+    Plotly.newPlot('action-distribution', [trace], layout);
+    }
 
-function resetNetworkView() {
-    if (window.networkCy) {
-        window.networkCy.fit();
-        window.networkCy.center();
+    function togglePlayback() {
+        if (playbackState.isPlaying) {
+            stopPlayback();
+        } else {
+            startPlayback();
+        }
+    }
+
+    function startPlayback() {
+        playbackState.isPlaying = true;
+        document.getElementById('play-pause-btn').textContent = '❚❚ Pause';
+        playbackState.intervalId = setInterval(() => {
+            let nextStep = playbackState.currentTimestep + 1;
+            if (nextStep >= playbackState.currentEpisode.timesteps.length) {
+                stopPlayback();
+            } else {
+                updatePlayback(nextStep);
+            }
+        }, playbackState.speed);
+    }
+
+    function stopPlayback() {
+        playbackState.isPlaying = false;
+        document.getElementById('play-pause-btn').textContent = '▶ Play';
+        if (playbackState.intervalId) {
+            clearInterval(playbackState.intervalId);
+            playbackState.intervalId = null;
+        }
+    }
+
+    // Tab functionality for run_detail page
+    function openTab(evt, tabName) {
+        const tabcontent = document.getElementsByClassName("tab-content");
+        for (let i = 0; i < tabcontent.length; i++) {
+            tabcontent[i].style.display = "none";
+            tabcontent[i].classList.remove("active-tab");
+        }
+        
+        const tablinks = document.getElementsByClassName("tab-button");
+        for (let i = 0; i < tablinks.length; i++) {
+            tablinks[i].classList.remove("active");
+        }
+        
+        const tabElement = document.getElementById(tabName);
+        if (tabElement) {
+            tabElement.style.display = "block";
+            tabElement.classList.add("active-tab");
+        }
+        evt.currentTarget.classList.add("active");
+        
+        // Initialize content when tab is first opened
+        if (tabName === 'progression' && !window.progressionInitialized) {
+            initProgressionPlots();
+            window.progressionInitialized = true;
+        } else if (tabName === 'playback' && !window.playbackInitialized) {
+            initPlayback();
+            window.playbackInitialized = true;
+        } else if (tabName === 'network' && !window.networkInitialized) {
+            initNetworkGraph();
+            window.networkInitialized = true;
+            // FIX: Run layout after the tab is visible
+            setTimeout(() => {
+                if (window.cy) {
+                    window.cy.layout({
+                        name: 'cose',
+                        animate: true,
+                        animationDuration: 500,
+                        nodeRepulsion: 8000,
+                        idealEdgeLength: 50,
+                        gravity: 0.1,
+                        numIter: 1000
+                    }).run();
+                }
+            }, 10);
+        }
+    }
+
+    // Functions for network view controls
+    function resetNetworkView() {
+        if (window.cy) {
+            window.cy.fit();
+        }
+    }
+
+    function toggleConnections() {
+        if (window.cy) {
+            const show = document.getElementById('show-connections').checked;
+            window.cy.edges().style('display', show ? 'element' : 'none');
+        }
+    }
+    
+    // Attach network control event handlers
+    const resetBtn = document.getElementById('reset-network-btn');
+    if (resetBtn) {
+        resetBtn.addEventListener('click', resetNetworkView);
+    }
+    
+    const showConnCheckbox = document.getElementById('show-connections');
+    if (showConnCheckbox) {
+        showConnCheckbox.addEventListener('change', toggleConnections);
     }
 }
 
-function toggleConnections() {
-    if (window.networkCy) {
-        const showConnections = document.getElementById('show-connections').checked;
-        window.networkCy.edges().style('display', showConnections ? 'element' : 'none');
-    }
-}
-
-// Tab switching for plots
-function showPlot(plotName) {
-    // Hide all plots
+// Tab switching for dashboard plots
+window.showPlot = function(plotName) {
     document.querySelectorAll('.plot-container').forEach(p => {
+        p.style.display = 'none';
         p.classList.remove('active-plot');
     });
-    document.querySelectorAll('.tab-button').forEach(b => {
-        b.classList.remove('active');
-    });
+    document.querySelectorAll('.plot-tabs .tab-button').forEach(b => b.classList.remove('active'));
     
-    // Show selected plot
-    document.getElementById(plotName + '-plot').classList.add('active-plot');
-    event.target.classList.add('active');
+    const plotElement = document.getElementById(plotName + '-plot');
+    if (plotElement) {
+        plotElement.style.display = 'block';
+        plotElement.classList.add('active-plot');
+    }
     
-    // Initialize plot if needed
-    if (plotName === 'scatter' && !window.scatterInitialized) {
+    if (event && event.target) {
+        event.target.classList.add('active');
+    }
+    
+    // Initialize plots on first view
+    if (plotName === 'parallel' && !window.parallelInitialized) {
+        initParallelCoords();
+        window.parallelInitialized = true;
+    } else if (plotName === 'scatter' && !window.scatterInitialized) {
         initScatterPlot();
         window.scatterInitialized = true;
     } else if (plotName === 'boxplot' && !window.boxplotInitialized) {

@@ -695,3 +695,178 @@ footer {
         display: none;
     }
 }
+
+/* Additional styles for Cross-Experiment Analysis */
+:root {
+    --bg-color: #f4f7fa;
+    --card-bg: #ffffff;
+    --text-color: #333;
+    --subtext-color: #777;
+    --primary-color: #007bff;
+    --border-color: #e0e0e0;
+    --shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+}
+
+/* ApexCharts styling overrides */
+.apexcharts-canvas {
+    background: transparent !important;
+}
+
+.apexcharts-title-text {
+    fill: var(--text-color);
+    font-weight: 600;
+}
+
+.apexcharts-xaxis-label,
+.apexcharts-yaxis-label {
+    fill: var(--subtext-color);
+}
+
+.apexcharts-gridline {
+    stroke: var(--border-color);
+}
+
+/* D3 Parallel Coordinates styling */
+.dimension .axis {
+    fill: none;
+    stroke: #ddd;
+    shape-rendering: crispEdges;
+}
+
+.dimension .axis text {
+    fill: var(--text-color);
+    font-size: 12px;
+}
+
+.dimension .axis .domain {
+    display: none;
+}
+
+.lines path {
+    transition: stroke-opacity 0.2s;
+}
+
+.lines path:hover {
+    stroke-opacity: 1 !important;
+    stroke-width: 2.5px !important;
+}
+
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+.main-title {
+    font-size: 28px;
+    font-weight: 600;
+    margin-bottom: 20px;
+}
+
+/* Stats Cards */
+.stats-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+    margin-bottom: 40px;
+}
+
+.stat-card h3 {
+    margin: 0 0 10px 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--subtext-color);
+    text-transform: uppercase;
+}
+
+.stat-card p {
+    margin: 0;
+    font-size: 36px;
+    font-weight: 700;
+    color: var(--text-color);
+}
+
+.stat-card .subtext {
+    font-size: 12px;
+    color: var(--subtext-color);
+    word-break: break-all;
+}
+
+/* Analysis Section */
+.analysis-container, .table-container {
+    background-color: var(--card-bg);
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    margin-bottom: 40px;
+}
+
+.section-title {
+    font-size: 22px;
+    margin-top: 0;
+    margin-bottom: 20px;
+}
+
+.tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.tab-button {
+    padding: 10px 15px;
+    cursor: pointer;
+    background: none;
+    border: none;
+    font-size: 16px;
+    color: var(--subtext-color);
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px; /* Overlap the container border */
+    transition: all 0.2s ease-in-out;
+}
+
+.tab-button:hover {
+    color: var(--text-color);
+}
+
+.tab-button.active {
+    color: var(--primary-color);
+    border-bottom-color: var(--primary-color);
+    font-weight: 600;
+}
+
+.tab-content {
+    display: none;
+    padding-top: 20px;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+.scatter-controls {
+    margin-bottom: 15px;
+}
+.scatter-controls select {
+    padding: 5px;
+    margin-right: 15px;
+}
+
+/* Table Styles Enhancement */
+#experiments-table th, #experiments-table td {
+    padding: 12px 15px;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color);
+}
+
+#experiments-table th {
+    background-color: #f9fafb;
+}
+
+#experiments-table tr:hover {
+    background-color: #f1f1f1;
+}
+
+#experiments-table a {
+    color: var(--primary-color);
+    text-decoration: none;
+    font-weight: 500;
+}
