@@ -162,19 +162,8 @@ class JaxDataExporter:
         # Create groups
         self.episodes_group = self.h5_file.create_group("episodes")
         
-        # Save experiment config
-        config_dict = {
-            "experiment_name": self.config.experiment_name,
-            "agent_version": self.config.agent_version,
-            "world_version": self.config.world_version,
-            "world": self.config.world._asdict(),
-            "neural": self.config.neural._asdict(),
-            "plasticity": self.config.plasticity._asdict(),
-            "behavior": self.config.behavior._asdict(),
-            "n_episodes": self.config.n_episodes,
-            "seed": self.config.seed,
-            "device": self.config.device
-        }
+        # Save experiment config - use the to_dict() method
+        config_dict = self.config.to_dict()
         with open(self.output_dir / "experiment_config.json", "w") as f:
             json.dump(config_dict, f, indent=2, cls=NumpyEncoder)
             

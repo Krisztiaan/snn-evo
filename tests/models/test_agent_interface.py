@@ -22,7 +22,10 @@ class TestAgentInterface:
         """Standard test configuration."""
         return ExperimentConfig(
             world=WorldConfig(grid_size=50, n_rewards=50, max_timesteps=1000),
-            neural=NeuralConfig(n_neurons=100, n_excitatory=80, n_inhibitory=20),
+            neural=NeuralConfig(
+                n_neurons=100, 
+                excitatory_ratio=0.8
+            ),
             plasticity=PlasticityConfig(enable_stdp=True),
             behavior=AgentBehaviorConfig(action_noise=0.1),
             experiment_name="agent_test",

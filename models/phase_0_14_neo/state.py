@@ -44,7 +44,7 @@ class NeoAgentState(NamedTuple):
     learning_rate: float  # Current learning rate
     
     # Motor and sensory
-    motor_trace: jnp.ndarray  # Motor output trace (4 actions)
+    motor_trace: jnp.ndarray  # Motor output trace (6 neurons: 3 movement, 3 turning)
     input_buffer: jnp.ndarray  # Input channel buffer
     
     # Structural properties
@@ -219,7 +219,7 @@ def create_initial_state(
         learning_rate=learning_config.base_learning_rate,
         
         # Motor/sensory
-        motor_trace=jnp.zeros(4),
+        motor_trace=jnp.zeros(6),  # 6 motor neurons: 3 movement, 3 turning
         input_buffer=jnp.zeros(n_input),
         
         # Structure

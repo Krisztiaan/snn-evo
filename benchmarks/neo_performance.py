@@ -20,11 +20,44 @@ from pathlib import Path
 import jax
 from jax.random import PRNGKey
 
-from interfaces import ExperimentConfig, ProtocolRunner
+from interfaces import ExperimentConfig, ProtocolRunner, ExporterProtocol
 from interfaces.config import WorldConfig, NeuralConfig, PlasticityConfig, AgentBehaviorConfig
 from world.simple_grid_0004 import MinimalGridWorld
-from export.jax_data_exporter import JaxDataExporter
+from export.jax_data_exporter import create_episode_buffer, log_step
 from models.phase_0_14_neo.agent import NeoAgent
+
+
+# Add this DummyExporter class at the top of the file
+class DummyExporter:
+    """A mock exporter that does no I/O, for performance testing."""
+
+    def start_episode(self, episode_id: int, *args, **kwargs):
+        # We need a real buffer and log_fn for the runner to work
+        
+        # A minimal config to create a buffer
+        dummy_cfg = ExperimentConfig(
+            world=WorldConfig(max_timesteps=10000), 
+            neural=NeuralConfig(n_neurons=1000), 
+            plasticity=None, behavior=None, experiment_name="", 
+            agent_version="", world_version="", flush_at_episode_end=False
+        )
+        buffer = create_episode_buffer(
+            dummy_cfg.world.max_timesteps,
+            dummy_cfg.neural.n_neurons,
+            episode_id
+        )
+        return buffer, jax.jit(log_step)
+
+    def end_episode(self, *args, **kwargs):
+        # Return dummy stats, do no I/O
+        return {"total_rewards": 0.0}
+
+    def save_network_structure(self, neurons, connections, initial_weights=None):
+        """Save network structure (dummy implementation)."""
+        pass
+
+    def close(self):
+        pass
 
 
 def create_benchmark_config() -> ExperimentConfig:
@@ -37,8 +70,7 @@ def create_benchmark_config() -> ExperimentConfig:
         ),
         neural=NeuralConfig(
             n_neurons=1000,
-            n_excitatory=800,
-            n_inhibitory=200,
+            excitatory_ratio=0.8,  # Use the ratio instead
             n_sensory=40,
             n_motor=9,
             tau_membrane=10.0
@@ -73,8 +105,8 @@ def main():
     config = create_benchmark_config()
     world = MinimalGridWorld(config.world)
     
-    # Use a dummy exporter to avoid I/O overhead in the benchmark itself
-    exporter = JaxDataExporter("neo_perf_test", config, config.export_dir)
+    # Use the new DummyExporter instead of the real one
+    exporter = DummyExporter() 
     agent = NeoAgent(config, exporter)
     runner = ProtocolRunner(world, agent, exporter, config)
 
@@ -119,8 +151,6 @@ def main():
 
     # Cleanup
     exporter.close()
-    if Path(config.export_dir).exists():
-        shutil.rmtree(config.export_dir)
 
 
 if __name__ == "__main__":

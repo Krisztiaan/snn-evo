@@ -205,6 +205,25 @@ class EpisodeData:
     def get_metadata(self) -> Dict[str, Any]:
         return dict(self.episode_group.attrs)
 
+    # This is the key change. We now access datasets by name.
+    def get(self, name: str) -> Optional[np.ndarray]:
+        """Get a dataset by name from the episode."""
+        if name in self.episode_group and isinstance(self.episode_group[name], h5py.Dataset):
+            return self.episode_group[name][:]
+        return None
+
+    def get_neural_states_simple(self) -> Optional[np.ndarray]:
+        """Get the neural states dataset directly."""
+        return self.get("neural_states")
+
+    def get_actions(self) -> Optional[np.ndarray]:
+        """Get the actions dataset."""
+        return self.get("actions")
+
+    def get_rewards_simple(self) -> Optional[np.ndarray]:
+        """Get the rewards dataset directly."""
+        return self.get("rewards")
+
     def get_neural_states(
         self, start: Optional[int] = None, stop: Optional[int] = None
     ) -> Dict[str, np.ndarray]:

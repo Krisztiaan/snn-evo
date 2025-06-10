@@ -14,7 +14,8 @@ from .config import DynamicsConfig, InputConfig, NetworkConfig
 def neuron_dynamics_step(
     state: NeoAgentState,
     key: random.PRNGKey,
-    config: DynamicsConfig
+    config: DynamicsConfig,
+    network_config: NetworkConfig
 ) -> NeoAgentState:
     """Single step of neural dynamics with LIF neurons (fully vectorized)."""
     n_neurons = state.v.shape[0]
@@ -67,6 +68,14 @@ def neuron_dynamics_step(
     rate_tau = 1000.0
     rate_alpha = 1.0 / rate_tau
     firing_rate = state.firing_rate * (1 - rate_alpha) + spike.astype(jnp.float32) * rate_alpha * 1000.0
+    
+    # 9. Update motor trace from readout spikes
+    readout_start = network_config.num_sensory + network_config.num_processing
+    readout_end = readout_start + 6  # We only use 6 motor neurons
+    readout_spikes = spike[readout_start:readout_end].astype(jnp.float32)
+    
+    tau_decay = jnp.exp(-1.0 / config.motor_tau)
+    motor_trace = state.motor_trace * tau_decay + readout_spikes * 10.0
 
     return state._replace(
         v=v,
@@ -76,7 +85,8 @@ def neuron_dynamics_step(
         syn_current_i=syn_current_i,
         trace_pre=trace_pre,
         trace_post=trace_post,
-        firing_rate=firing_rate
+        firing_rate=firing_rate,
+        motor_trace=motor_trace
     )
 
 
@@ -111,31 +121,60 @@ def decode_action(
     dynamics_config: DynamicsConfig,
     network_config: NetworkConfig
 ) -> Tuple[int, jnp.ndarray]:
-    """Decode action from readout neurons (vectorized)."""
-    # Get readout neuron spikes
+    """Decode an action from a unified pool of 6 motor neurons.
+    
+    Motor neurons vote for actions:
+    - 0: FWD_LEFT
+    - 1: FWD
+    - 2: FWD_RIGHT
+    - 3: STOP_LEFT (pure rotation left)
+    - 4: STOP (stay in place)
+    - 5: STOP_RIGHT (pure rotation right)
+    """
+    # 1. Get spikes from all 6 readout neurons
     readout_start = network_config.num_sensory + network_config.num_processing
-    readout_spikes = state.spike[readout_start:]
+    readout_end = readout_start + 6  # We only use 6 motor neurons
+    readout_spikes = state.spike[readout_start:readout_end].astype(jnp.float32)
 
-    # Update motor trace (leaky integration)
+    # 2. Update the motor trace (leaky integration for vote accumulation)
     tau_decay = jnp.exp(-1.0 / dynamics_config.motor_tau)
-    motor_trace = state.motor_trace * tau_decay
+    new_motor_trace = state.motor_trace * tau_decay + readout_spikes * 10.0
 
-    # --- Vectorized update of motor trace ---
-    n_actions = 4
-    neurons_per_action = network_config.num_readout // n_actions
-    
-    # Reshape readout spikes into (n_actions, neurons_per_action)
-    action_spikes_matrix = readout_spikes.reshape((n_actions, neurons_per_action))
-    
-    # Sum spikes for each action group along axis 1
-    total_spikes_per_action = jnp.sum(action_spikes_matrix, axis=1)
-    
-    # Add the result to the motor trace
-    motor_trace = motor_trace + total_spikes_per_action * 10.0
-    # --- End of vectorization ---
+    # 3. "Vote" using softmax with temperature for stochastic action selection
+    logits = new_motor_trace / state.action_temperature
+    action_choice = random.categorical(key, logits)  # Result: an integer from 0 to 5
 
-    # Action selection with softmax and temperature
-    logits = motor_trace / state.action_temperature
-    action = random.categorical(key, logits)
+    # 4. Direct mapping to world actions
+    # Our 6 agent actions map to world actions:
+    #   Agent 0 -> World 7: FORWARD_LEFT
+    #   Agent 1 -> World 0: FORWARD
+    #   Agent 2 -> World 1: FORWARD_RIGHT
+    #   Agent 3 -> World 6: LEFT (pure rotation)
+    #   Agent 4 -> World 8: STAY
+    #   Agent 5 -> World 2: RIGHT (pure rotation)
+    
+    # Create mapping array
+    action_map = jnp.array([7, 0, 1, 6, 8, 2])
+    world_action = action_map[action_choice]
 
-    return action, motor_trace
+    return world_action, new_motor_trace
+
+
+def decode_action_from_trace(
+    state: NeoAgentState,
+    key: random.PRNGKey,
+    dynamics_config: DynamicsConfig
+) -> int:
+    """Statelessly selects an action based on the current motor trace.
+    
+    This is used after the integration window to decode the final action.
+    """
+    # Use softmax with temperature for stochastic action selection
+    logits = state.motor_trace / state.action_temperature
+    action_choice = random.categorical(key, logits)  # Result: an integer from 0 to 5
+    
+    # Direct mapping to world actions
+    action_map = jnp.array([7, 0, 1, 6, 8, 2])
+    world_action = action_map[action_choice]
+    
+    return world_action

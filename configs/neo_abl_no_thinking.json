@@ -1,12 +1,12 @@
 {
   "world": {
-    "grid_size": 100,
-    "n_rewards": 300,
-    "max_timesteps": 20000
+    "grid_size": 20,
+    "n_rewards": 70,
+    "max_timesteps": 5000
   },
   "neural": {
-    "n_neurons": 1000,
-    "n_sensory": 40,
+    "n_neurons": 256,
+    "n_sensory": 24,
     "n_motor": 6,
     "excitatory_ratio": 0.8
   },
@@ -16,8 +16,8 @@
     "enable_reward_modulation": true
   },
   "behavior": {
-    "action_noise": 0.01,
-    "temperature": 1.0,
-    "action_integration_steps": 5
+    "action_noise": 0.05,
+    "temperature": 1.2,
+    "action_integration_steps": 1
   }
 }

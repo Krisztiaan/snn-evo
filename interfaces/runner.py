@@ -20,10 +20,10 @@ from interfaces.episode_data import StepData
 from export.jax_data_exporter import create_episode_buffer
 
 
-@partial(jax.jit, static_argnames=('world_step_fn', 'agent_step_fn', 'log_fn', 'max_steps'))
+@partial(jax.jit, static_argnames=('world_step_fn', 'agent_select_action_fn', 'log_fn', 'max_steps'))
 def run_episode_jax(
     world_step_fn: callable,
-    agent_step_fn: callable,
+    agent_select_action_fn: callable,
     log_fn: callable,
     initial_w_state: WorldState,
     initial_a_state: Any,
@@ -33,36 +33,39 @@ def run_episode_jax(
 ) -> Tuple[WorldState, Any, EpisodeBufferProtocol]:
     """JIT-compiled function to run an entire episode."""
 
-    def step_fn(carry, step_idx):
+    # The complex logic is GONE. It's now beautifully simple.
+    def episode_step_fn(carry, step_idx):
         w_state, a_state, buffer, key = carry
-        last_gradient = w_state.last_gradient  # Assume gradient is part of world state
-
-        # 1. Agent acts
-        key, agent_key = split(key)
-        new_a_state, action, neural_data = agent_step_fn(a_state, last_gradient, agent_key)
-
-        # 2. World steps forward
-        new_w_state, new_gradient = world_step_fn(w_state, action)
         
-        # 3. Log the results of the state transition
+        # Split key for world and agent
+        w_key, a_key, loop_key = split(key, 3)
+        last_gradient = w_state.last_gradient
+
+        # 1. AGENT THINKS AND ACTS: Agent is a black box that gives us an action.
+        new_a_state, action, neural_data = agent_select_action_fn(
+            a_state, last_gradient, a_key
+        )
+
+        # 2. UPDATE WORLD: Take the action in the environment.
+        new_w_state, _ = world_step_fn(w_state, action)
+
+        # 3. LOG: Record the outcome of this world step.
         reward = jnp.where(last_gradient >= 0.99, 1.0, 0.0)
         step_data = StepData(
             timestep=step_idx,
             gradient=last_gradient,
             action=action,
             reward=reward,
-            neural_v=neural_data.get('v', jnp.zeros(1)),  # Default to zeros if not present
-            neural_data=neural_data
+            neural_v=neural_data['v'], # Get data from the agent's return
+            neural_data={'spikes': neural_data['spikes']}
         )
         new_buffer = log_fn(buffer, step_data)
 
-        return (new_w_state, new_a_state, new_buffer, key), None
+        return (new_w_state, new_a_state, new_buffer, loop_key), None
 
-    # Initial state for the scan loop
     init_carry = (initial_w_state, initial_a_state, initial_buffer, key)
-
     (final_w_state, final_a_state, final_buffer, _), _ = lax.scan(
-        step_fn, init_carry, jnp.arange(max_steps)
+        episode_step_fn, init_carry, jnp.arange(max_steps)
     )
 
     return final_w_state, final_a_state, final_buffer
@@ -103,34 +106,42 @@ class ProtocolRunner:
         buffer, log_fn = self.exporter.start_episode(episode_id)
 
         if use_jit:
-            # High-performance path
+            # High-performance path - notice how clean this is now!
             final_w_state, final_a_state, final_buffer = run_episode_jax(
                 self.world.step,
-                self.agent.step,  # Use the pure protocol step method
+                self.agent.select_action,  # <-- Pass the new method
                 log_fn,
                 world_state, agent_state, buffer, run_key,
-                self.config.world.max_timesteps
+                self.config.world.max_timesteps,
             )
-            self.agent.state = final_a_state  # Update host-side state
+            # The agent's host-side state needs to be updated after the JIT run
+            self.agent.state = final_a_state
         else:
-            # Simple loop for debugging
+            # Debug loop
             gradient = world_state.last_gradient
             agent_state_local = agent_state
             for step in range(self.config.world.max_timesteps):
                 agent_key, step_key = split(agent_key)
-                new_agent_state, action, neural_data = self.agent.step(agent_state_local, gradient, step_key)
+                
+                # Call the agent's select_action method
+                agent_state_local, action, neural_data = self.agent.select_action(
+                    agent_state_local, gradient, step_key
+                )
+                
+                # Log data
                 reward = jnp.where(gradient >= 0.99, 1.0, 0.0)
                 step_data = StepData(
                     timestep=step,
                     gradient=gradient,
                     action=action,
                     reward=reward,
-                    neural_v=neural_data.get('v', jnp.zeros(1)),
-                    neural_data=neural_data
+                    neural_v=neural_data['v'],
+                    neural_data={'spikes': neural_data['spikes']}
                 )
                 buffer = log_fn(buffer, step_data)
+                
+                # Update world
                 world_state, gradient = self.world.step(world_state, action)
-                agent_state_local = new_agent_state
             final_w_state, final_buffer = world_state, buffer
             self.agent.state = agent_state_local
 
@@ -156,8 +167,12 @@ class ProtocolRunner:
         return stats
     
     
-    def run_experiment(self) -> Dict[str, List[Dict[str, float]]]:
-        """Run full experiment."""
+    def run_experiment(self, use_jit: bool = True) -> Dict[str, List[Dict[str, float]]]:
+        """Run full experiment.
+        
+        Args:
+            use_jit: Whether to use JIT compilation (default: True)
+        """
         # Save metadata
         world_config = self.world.get_config()
         self.exporter.save_experiment_metadata(
@@ -173,7 +188,7 @@ class ProtocolRunner:
         
         for episode in range(self.config.n_episodes):
             key, episode_key = split(key)
-            stats = self.run_episode(episode, episode_key)
+            stats = self.run_episode(episode, episode_key, use_jit=use_jit)
             episode_stats.append(stats)
             
             if self.config.log_to_console and episode % 10 == 0:
@@ -277,7 +292,7 @@ class ProtocolRunner:
             # 6. Run all episodes in parallel
             final_w_states, final_a_states, final_buffers = vmapped_runner(
                 self.world.step,
-                self.agent.step,
+                self.agent.select_action,
                 log_fn,
                 batched_world_states,
                 batched_agent_states,
@@ -372,8 +387,7 @@ def create_experiment_config(
         # Neural config (even for random agent, needed by protocol)
         neural=NeuralConfig(
             n_neurons=100,
-            n_excitatory=80,
-            n_inhibitory=20,
+            excitatory_ratio=0.8,  # Use the ratio
             n_sensory=10,
             n_motor=9
         ),

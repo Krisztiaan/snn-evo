@@ -11,8 +11,9 @@ from interfaces import (
     WorldProtocol, WorldState, WorldConfig,
     AgentProtocol, ExperimentConfig, 
     ExporterProtocol, EpisodeBufferProtocol, LogTimestepFunction,
-    NeuralConfig, PlasticityConfig, AgentBehaviorConfig, EpisodeData
+    NeuralConfig, PlasticityConfig, AgentBehaviorConfig
 )
+from interfaces.episode_data import EpisodeData, StepData
 from world.simple_grid_0004 import MinimalGridWorld
 from models.random.agent import RandomAgent
 
@@ -57,10 +58,7 @@ class MockExporter:
         
         def log_timestep(
             buffer: EpisodeBufferProtocol,
-            timestep: int,
-            gradient: jax.Array,
-            action: int,
-            neural_state = None
+            step_data: StepData
         ) -> EpisodeBufferProtocol:
             # In real implementation, this would update buffer immutably
             # For testing, we don't need JIT compilation
@@ -71,7 +69,6 @@ class MockExporter:
     def end_episode(
         self,
         buffer,
-        episode_data: EpisodeData,
         world_reward_tracking: Dict[str, jax.Array],
         success: bool = False
     ) -> Dict[str, float]:
@@ -81,8 +78,8 @@ class MockExporter:
         # Return mock statistics
         return {
             "episode_id": buffer.episode_id,
-            "timesteps": buffer.max_size,  # Use buffer size, not episode data length
-            "total_rewards": float(episode_data.total_reward_events),
+            "timesteps": buffer.max_size,  # Use buffer size
+            "total_rewards": 0.0,  # Mock value
             "duration_seconds": 1.0,
             "steps_per_second": float(buffer.max_size),
             "action_entropy": 0.0,
@@ -158,7 +155,10 @@ def test_agent_protocol_compliance():
     # Create experiment config
     config = ExperimentConfig(
         world=WorldConfig(grid_size=10, n_rewards=5, max_timesteps=100),
-        neural=NeuralConfig(n_neurons=100),
+        neural=NeuralConfig(
+            n_neurons=100, 
+            excitatory_ratio=0.8
+        ),
         plasticity=PlasticityConfig(),
         behavior=AgentBehaviorConfig(),
         experiment_name="test",
@@ -183,21 +183,20 @@ def test_agent_protocol_compliance():
     
     # Test methods
     key = PRNGKey(42)
-    agent.reset(key)
+    agent_state = agent.reset(key)  # Get the initial state
     
-    # Test act
+    # Test select_action
     gradient = jnp.array(0.5)
     action_key = PRNGKey(43)
-    action = agent.act(gradient, action_key)
+    
+    # The method now returns a tuple
+    new_state, action, neural_data = agent.select_action(agent_state, gradient, action_key)
+    
+    assert new_state is not None
     assert isinstance(action, jax.Array)
     action_int = int(action)
     assert 0 <= action_int <= 8
-    
-    # Test episode data
-    episode_data = agent.get_episode_data()
-    assert isinstance(episode_data, EpisodeData)
-    assert isinstance(episode_data.actions, jax.Array)
-    assert isinstance(episode_data.gradients, jax.Array)
+    assert isinstance(neural_data, dict)
     
     print("✓ Agent protocol compliance test passed")
 
@@ -230,15 +229,8 @@ def test_exporter_protocol_compliance():
     assert callable(log_fn)
     
     # Test episode end
-    episode_data = EpisodeData(
-        actions=jnp.zeros(10),
-        gradients=jnp.zeros(10),
-        total_reward_events=5
-    )
-    
     stats = exporter.end_episode(
         buffer, 
-        episode_data,
         {"positions": jnp.zeros((5, 2))},
         success=True
     )
@@ -252,7 +244,7 @@ def test_exporter_protocol_compliance():
 
 def test_integrated_episode_run():
     """Test a complete episode run with protocol-compliant components."""
-    from interfaces import ProtocolRunner, create_experiment_config
+    from interfaces.runner import ProtocolRunner, create_experiment_config
     
     # Setup
     config = create_experiment_config(
@@ -288,7 +280,7 @@ def test_integrated_episode_run():
     
 def test_full_experiment():
     """Test running a full experiment with the protocol runner."""
-    from interfaces import ProtocolRunner, create_experiment_config
+    from interfaces.runner import ProtocolRunner, create_experiment_config
     
     # Setup
     config = create_experiment_config(

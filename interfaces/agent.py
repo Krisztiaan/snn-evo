@@ -43,20 +43,21 @@ class AgentProtocol(Protocol):
         """
         ...
 
-    def step(self, state: Any, gradient: Array, key: PRNGKey) -> Tuple[Any, Array, Dict[str, Array]]:
+    def select_action(self, state: Any, gradient: Array, key: PRNGKey) -> Tuple[Any, Array, Dict[str, Array]]:
         """
-        Pure, JIT-compilable agent step function.
-        
+        Pure, JIT-compilable function to select a single action for a world step.
+        This can involve multiple internal agent steps (a 'thinking loop').
+
         Args:
             state: Current agent state.
             gradient: Observation from the world (float32 scalar in [0, 1]).
             key: JAX random key.
-            
+
         Returns:
-            Tuple of (new_agent_state, action, neural_data).
-            - new_agent_state: Updated agent state (implementation-specific type)
-            - action: Array scalar int32 0-8 encoding movement and rotation
-            - neural_data: Dict of neural data for logging (e.g. {'v': membrane_potentials})
+            Tuple of (new_agent_state, action, neural_data_for_logging).
+            - new_agent_state: Updated agent state after thinking.
+            - action: A single integer action (e.g., 0-8) for the world.
+            - neural_data: A dict of representative neural data for the last step.
         """
         ...
 

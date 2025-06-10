@@ -47,26 +47,27 @@ class RandomAgent:
         action = randint(key, (), 0, 9)
         return action
     
-    def act(self, gradient: Array, key: PRNGKey) -> Tuple[Array, Any, Dict[str, Array]]:
-        """Select action and update host-side state for non-JIT execution.
+    def select_action(self, state: Any, gradient: Array, key: PRNGKey) -> Tuple[Any, Array, Dict[str, Array]]:
+        """Select action following the new protocol.
         
         Args:
+            state: Current agent state
             gradient: float32 scalar in [0, 1], distance signal to nearest reward
             key: JAX random key for stochastic action selection
             
         Returns:
             Tuple of:
+                - new_state: Updated agent state
                 - action: Array scalar int32 0-8 encoding movement and rotation
-                - state: Updated agent state (for interface compatibility)
                 - neural_data: Empty dict for random agent
         """
-        # Call the pure JIT function with the current host state
-        new_state, action, neural_data = self.step(self.state, gradient, key)
+        # Call the pure JIT function
+        new_state, action, neural_data = self.step(state, gradient, key)
         
         # Update the host-side state
         self.state = new_state
         
-        return action, self.state, neural_data
+        return new_state, action, neural_data
     
     @staticmethod
     @jax.jit
@@ -82,7 +83,10 @@ class RandomAgent:
             reward_count=state.reward_count + jnp.where(reward_received, 1, 0)
         )
         
-        # No neural data for random agent
-        neural_data = {}
+        # Minimal neural data for random agent
+        neural_data = {
+            'v': jnp.zeros(1),  # Dummy membrane potential
+            'spikes': jnp.zeros(1, dtype=bool)  # No spikes
+        }
         
         return new_state, action, neural_data

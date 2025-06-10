@@ -1,0 +1,23 @@
+{
+  "world": {
+    "grid_size": 20,
+    "n_rewards": 70,
+    "max_timesteps": 5000
+  },
+  "neural": {
+    "n_neurons": 256,
+    "n_sensory": 24,
+    "n_motor": 6,
+    "excitatory_ratio": 0.8
+  },
+  "plasticity": {
+    "enable_stdp": true,
+    "enable_homeostasis": true,
+    "enable_reward_modulation": false
+  },
+  "behavior": {
+    "action_noise": 0.05,
+    "temperature": 1.2,
+    "action_integration_steps": 3
+  }
+}

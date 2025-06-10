@@ -11,6 +11,7 @@ from typing import Dict, Optional, Tuple, Any
 
 import jax
 import jax.numpy as jnp
+import jax.lax
 from jax import Array, jit
 from jax.random import PRNGKey, split
 
@@ -19,7 +20,7 @@ from rules import RuleContext, create_rule_pipeline
 
 from .config import InputConfig, DynamicsConfig, NetworkConfig, LearningRulesConfig
 from .state import NeoAgentState, create_initial_state, update_weight_matrices
-from .dynamics import neuron_dynamics_step, decode_action, encode_input
+from .dynamics import neuron_dynamics_step, decode_action, encode_input, decode_action_from_trace
 
 
 class NeoAgent:
@@ -36,16 +37,16 @@ class NeoAgent:
         self.exporter = exporter
         
         # Create component configs directly from ExperimentConfig
-        # Calculate total processing neurons
-        total_neurons = config.neural.n_excitatory + config.neural.n_inhibitory
-        processing_neurons = total_neurons - config.neural.n_sensory - config.neural.n_motor
-        
+        # The total number of processing neurons is total - sensory - motor.
+        processing_neurons = config.neural.n_neurons - config.neural.n_sensory - config.neural.n_motor
+
         self.network_config = NetworkConfig(
             num_sensory=config.neural.n_sensory,
             num_processing=processing_neurons,
             num_readout=config.neural.n_motor,
             num_input_channels=4,  # 4 gradient directions
-            excitatory_ratio=config.neural.n_excitatory / total_neurons
+            # We can now use the ratio directly from the config!
+            excitatory_ratio=config.neural.excitatory_ratio 
         )
         
         self.dynamics_config = DynamicsConfig(
@@ -97,8 +98,8 @@ class NeoAgent:
         self.initial_state: Optional[NeoAgentState] = None
         self.timestep = 0
         
-        # Create JIT-compiled step function with configs closed over
-        self.step = self._create_step_function()
+        # We no longer need a pre-compiled step function
+        # since select_action will handle everything
     
     def reset(self, key: PRNGKey) -> NeoAgentState:
         """Reset agent's internal state for new episode."""
@@ -136,52 +137,70 @@ class NeoAgent:
         
         return self.state
     
-    def _create_step_function(self):
-        """Create a JIT-compiled step function with configs closed over."""
-        # Capture configs and pipeline in closure
-        input_config = self.input_config
-        dynamics_config = self.dynamics_config
-        network_config = self.network_config
-        rule_pipeline = self.rule_pipeline
-        
-        @jit
-        def step_wrapper(state: NeoAgentState, gradient: Array, key: PRNGKey) -> Tuple[Array, NeoAgentState, Dict[str, Array]]:
-            """Pure JAX step function for the runner."""
-            # Use the agent's current timestep from state
-            timestep = state.timestep
-            
-            # Call the original step function with all parameters
-            new_state, action, neural_data = NeoAgent.step_impl(
-                state,
-                gradient,
-                key,
-                timestep,
-                input_config,
-                dynamics_config,
-                network_config,
-                rule_pipeline
-            )
-            
-            return new_state, action, neural_data
-        
-        return step_wrapper
     
-    def act(self, gradient: Array, key: PRNGKey) -> Tuple[Array, Any, Dict[str, Array]]:
-        """Select action and update host-side state for non-JIT execution.
-        
-        Returns:
-            action: The selected action
-            state: Updated agent state (for interface compatibility)
-            neural_data: Neural data for logging
-        """
-        # Call the pure JIT function with the current host state
-        new_state, action, neural_data = self.step(self.state, gradient, key)
+    def select_action(self, state: Any, gradient: Array, key: PRNGKey) -> Tuple[Any, Array, Dict[str, Array]]:
+        """Select action and update host-side state for non-JIT execution."""
+        # This static method will now contain all the JIT'd logic.
+        new_state, action, neural_data = self._select_action_jit(
+            state, gradient, key,
+            self.config.behavior.action_integration_steps,
+            self.input_config,
+            self.dynamics_config,
+            self.network_config,
+            self.rule_pipeline
+        )
         
         # Update the host-side state
         self.state = new_state
         self.timestep = new_state.timestep
         
-        return action, self.state, neural_data
+        return new_state, action, neural_data
+
+    @staticmethod
+    @partial(jit, static_argnums=(3, 4, 5, 6, 7))
+    def _select_action_jit(
+        state: NeoAgentState,
+        gradient: Array,
+        key: PRNGKey,
+        integration_steps: int,
+        input_config,
+        dynamics_config,
+        network_config,
+        rule_pipeline
+    ) -> Tuple[NeoAgentState, Array, Dict[str, Array]]:
+        """
+        Pure JAX function that runs the 'thinking loop' and decodes a single action.
+        """
+        # 1. Define the internal thinking step function
+        def integration_step_fn(carry, _):
+            a_state, key = carry
+            key, step_key = split(key)
+            # Use the existing step_impl for one internal step
+            new_a_state, _, _ = NeoAgent.step_impl(
+                a_state, gradient, step_key, a_state.timestep,
+                input_config, dynamics_config, network_config, rule_pipeline
+            )
+            return (new_a_state, key), None
+
+        # 2. Run the 'thinking loop' using lax.scan
+        key, scan_key = split(key)
+        (integrated_state, _), _ = jax.lax.scan(
+            integration_step_fn,
+            (state, scan_key),
+            jnp.arange(integration_steps)
+        )
+
+        # 3. Decode a single action from the final integrated state
+        key, action_key = split(key)
+        action = decode_action_from_trace(integrated_state, action_key, dynamics_config)
+
+        # 4. Prepare neural data for logging (from the final state)
+        neural_data = {
+            "v": integrated_state.v,
+            "spikes": integrated_state.spike,
+        }
+
+        return integrated_state, action, neural_data
     
     
     @staticmethod
@@ -197,7 +216,7 @@ class NeoAgent:
         rule_pipeline: Any
     ) -> Tuple[NeoAgentState, Array, Dict[str, Array]]:
         """Single agent step - JIT compiled."""
-        keys = split(key, 3)
+        keys = split(key, 2)  # Only need 2 keys now (input and dynamics)
         
         # 1. Encode input
         input_channels = encode_input(
@@ -205,14 +224,8 @@ class NeoAgent:
         )
         state = state._replace(input_buffer=input_channels)
         
-        # 2. Neural dynamics
-        state = neuron_dynamics_step(state, keys[1], dynamics_config)
-        
-        # 3. Decode action
-        action, motor_trace = decode_action(
-            state, keys[2], dynamics_config, network_config
-        )
-        state = state._replace(motor_trace=motor_trace)
+        # 2. Neural dynamics (now includes motor trace updates)
+        state = neuron_dynamics_step(state, keys[1], dynamics_config, network_config)
         
         # 4. Apply learning rules
         # Check if reward received (gradient near 1.0)
@@ -226,7 +239,7 @@ class NeoAgent:
         context = RuleContext(
             reward=reward_received.astype(jnp.float32),
             observation=gradient,
-            action=action,
+            action=jnp.array(0),  # Dummy action for now
             spike_count=total_spike_count,  # Use pre-computed
             population_rate=total_spike_count / n_neurons,  # Use pre-computed
             pre_spike_sum=total_spike_count,  # Use pre-computed
@@ -255,7 +268,10 @@ class NeoAgent:
             "firing_rate": state.firing_rate,
         }
         
-        return state, action, neural_data
+        # Return dummy action (-1) to satisfy protocol signature
+        dummy_action = jnp.array(-1, dtype=jnp.int32)
+        
+        return state, dummy_action, neural_data
     
     @staticmethod
     @jit
@@ -310,7 +326,7 @@ class NeoAgent:
             value_estimate=state.value_estimate * 0.5,
             
             # Reset motor
-            motor_trace=jnp.zeros(4),
+            motor_trace=jnp.zeros(6),  # 6 motor neurons
             input_buffer=jnp.zeros(input_buffer_size),
             
             # Update meta
