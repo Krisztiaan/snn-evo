@@ -19,15 +19,15 @@ def neuron_dynamics_step(
     noise_key, _ = random.split(key)
 
     # 1. Synaptic dynamics (exponential decay)
-    tau_e_decay = jnp.exp(-1.0 / config.tau_syn_e)
-    tau_i_decay = jnp.exp(-1.0 / config.tau_syn_i)
+    tau_e_decay = jnp.exp(-1.0 / config.tau_syn_e).astype(jnp.float16)
+    tau_i_decay = jnp.exp(-1.0 / config.tau_syn_i).astype(jnp.float16)
 
     syn_current_e = state.syn_current_e * tau_e_decay
     syn_current_i = state.syn_current_i * tau_i_decay
 
     # 2. Add spike-driven synaptic input (vectorized)
     # Combine input and recurrent spikes into a single pre-synaptic activity vector
-    spike_input = jnp.concatenate([state.input_buffer, state.spike.astype(jnp.float32)])
+    spike_input = jnp.concatenate([state.input_buffer, state.spike.astype(jnp.float16)])
 
     # --- Optimization: Use pre-separated weight matrices ---
     # `w_exc` and `w_inh` are now part of NeoAgentState
@@ -35,46 +35,46 @@ def neuron_dynamics_step(
     syn_current_i += state.w_inh @ spike_input
 
     # 3. Update membrane potential
-    v_decay = jnp.exp(-1.0 / config.tau_v)
-    v = state.v * v_decay + config.v_rest * (1 - v_decay)
+    v_decay = jnp.exp(-1.0 / config.tau_v).astype(jnp.float16)
+    v = state.v * v_decay + jnp.float16(config.v_rest) * (1 - v_decay)
     v += syn_current_e - syn_current_i
 
-    noise = random.normal(noise_key, (n_neurons,)) * config.noise_scale
-    v += config.baseline_current + noise
+    noise = (random.normal(noise_key, (n_neurons,)) * config.noise_scale).astype(jnp.float16)
+    v += jnp.float16(config.baseline_current) + noise
 
     # Apply refractory period
-    v = jnp.where(state.refractory > 0, config.v_reset, v)
+    v = jnp.where(state.refractory > 0, jnp.float16(config.v_reset), v)
 
     # 4. Check for spikes with adaptive threshold
     effective_threshold = config.v_threshold + state.threshold_adapt
     spike = (v >= effective_threshold) & (state.refractory == 0)
 
     # 5. Reset spiking neurons
-    v = jnp.where(spike, config.v_reset, v)
+    v = jnp.where(spike, jnp.float16(config.v_reset), v)
 
     # 6. Update refractory period
     refractory = jnp.where(spike, config.refractory_time, jnp.maximum(0, state.refractory - 1))
 
     # 7. Update traces
-    tau_pre_decay = jnp.exp(-1.0 / 20.0)
-    tau_post_decay = jnp.exp(-1.0 / 20.0)
-    trace_pre = state.trace_pre * tau_pre_decay + spike.astype(jnp.float32)
-    trace_post = state.trace_post * tau_post_decay + spike.astype(jnp.float32)
+    tau_pre_decay = jnp.exp(-1.0 / 20.0).astype(jnp.float16)
+    tau_post_decay = jnp.exp(-1.0 / 20.0).astype(jnp.float16)
+    trace_pre = state.trace_pre * tau_pre_decay + spike.astype(jnp.float16)
+    trace_post = state.trace_post * tau_post_decay + spike.astype(jnp.float16)
 
     # 8. Update firing rate (slow moving average)
     rate_tau = 1000.0
     rate_alpha = 1.0 / rate_tau
     firing_rate = (
-        state.firing_rate * (1 - rate_alpha) + spike.astype(jnp.float32) * rate_alpha * 1000.0
+        state.firing_rate * (1 - rate_alpha) + spike.astype(jnp.float16) * rate_alpha * 1000.0
     )
 
     # 9. Update motor trace from readout spikes
     readout_start = network_config.num_sensory + network_config.num_processing
     readout_end = readout_start + 6  # We only use 6 motor neurons
-    readout_spikes = spike[readout_start:readout_end].astype(jnp.float32)
+    readout_spikes = spike[readout_start:readout_end].astype(jnp.float16)
 
-    tau_decay = jnp.exp(-1.0 / config.motor_tau)
-    motor_trace = state.motor_trace * tau_decay + readout_spikes * 10.0
+    tau_decay = jnp.exp(-1.0 / config.motor_tau).astype(jnp.float16)
+    motor_trace = state.motor_trace * tau_decay + readout_spikes * jnp.float16(10.0)
 
     return state._replace(
         v=v,
@@ -95,20 +95,20 @@ def encode_input(
     """Encode gradient value into input channels."""
     # Create tuning curves for each channel
     # Channels are tuned to different gradient values
-    preferred_values = jnp.linspace(0, 1, n_channels)
+    preferred_values = jnp.linspace(0, 1, n_channels).astype(jnp.float16)
 
     # Gaussian tuning curves
-    distances = jnp.abs(preferred_values - gradient)
-    responses = jnp.exp(-0.5 * (distances / config.input_tuning_width) ** 2)
+    distances = jnp.abs(preferred_values - jnp.float16(gradient))
+    responses = jnp.exp(-0.5 * (distances / jnp.float16(config.input_tuning_width)) ** 2)
 
     # Scale by input gain
-    responses = responses * config.input_gain
+    responses = responses * jnp.float16(config.input_gain)
 
     # Add noise
-    noise = random.normal(key, (n_channels,)) * config.input_noise
+    noise = (random.normal(key, (n_channels,)) * config.input_noise).astype(jnp.float16)
     responses = jnp.maximum(0, responses + noise)
 
-    return responses
+    return responses.astype(jnp.float16)
 
 
 def decode_action(
@@ -130,7 +130,7 @@ def decode_action(
     # 1. Get spikes from all 6 readout neurons
     readout_start = network_config.num_sensory + network_config.num_processing
     readout_end = readout_start + 6  # We only use 6 motor neurons
-    readout_spikes = state.spike[readout_start:readout_end].astype(jnp.float32)
+    readout_spikes = state.spike[readout_start:readout_end].astype(jnp.float16)
 
     # 2. Update the motor trace (leaky integration for vote accumulation)
     tau_decay = jnp.exp(-1.0 / dynamics_config.motor_tau)

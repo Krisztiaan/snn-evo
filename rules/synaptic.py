@@ -92,7 +92,7 @@ class STDPRule(AbstractLearningRule):
         n_inputs = n_pre_total - n_neurons
         
         # Create pre-synaptic activity vector (inputs + neurons)
-        pre_spikes = jnp.concatenate([state.input_buffer > 0.5, state.spike.astype(jnp.float32)])
+        pre_spikes = jnp.concatenate([state.input_buffer > 0.5, state.spike.astype(jnp.float16)])
         
         # Create pre-synaptic trace vector
         pre_traces = jnp.concatenate([state.input_buffer, state.trace_pre])
@@ -167,8 +167,8 @@ class HebbianRule(AbstractLearningRule):
     def apply(self, state: NeoAgentState, context: RuleContext) -> NeoAgentState:
         """Apply Hebbian learning rule."""
         # Convert spikes to float
-        pre_activity = state.spike.astype(jnp.float32)
-        post_activity = state.spike.astype(jnp.float32)
+        pre_activity = state.spike.astype(jnp.float16)
+        post_activity = state.spike.astype(jnp.float16)
         
         # Hebbian update: correlated activity
         hebbian_term = jnp.outer(post_activity, pre_activity)
@@ -247,7 +247,7 @@ class CovarianceRule(AbstractLearningRule):
         
         # Covariance term: (post_rate - theta) * pre_spike
         post_term = (post_rate - theta)[:, None]
-        pre_term = state.spike[None, :].astype(jnp.float32)
+        pre_term = state.spike[None, :].astype(jnp.float16)
         
         # Weight update
         dw = self.learning_rate * post_term * pre_term * state.w_plastic_mask

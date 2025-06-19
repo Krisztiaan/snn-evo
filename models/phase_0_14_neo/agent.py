@@ -238,12 +238,12 @@ class NeoAgent:
         reward_received = gradient >= 0.99
 
         # --- Optimization: Compute expensive values once ---
-        current_spikes = state.spike.astype(jnp.float32)
+        current_spikes = state.spike.astype(jnp.float16)
         total_spike_count = jnp.sum(current_spikes)
         n_neurons = state.v.shape[0]
 
         context = RuleContext(
-            reward=reward_received.astype(jnp.float32),
+            reward=reward_received.astype(jnp.float16),
             observation=gradient,
             action=jnp.array(0),  # Dummy action for now
             spike_count=total_spike_count,  # Use pre-computed
@@ -306,24 +306,24 @@ class NeoAgent:
 
         return state._replace(
             # Reset dynamics
-            v=jnp.full(n_neurons, v_rest),
+            v=jnp.full(n_neurons, v_rest, dtype=jnp.float16),
             spike=jnp.zeros(n_neurons, dtype=bool),
-            refractory=jnp.zeros(n_neurons),
-            syn_current_e=jnp.zeros(n_neurons),
-            syn_current_i=jnp.zeros(n_neurons),
+            refractory=jnp.zeros(n_neurons, dtype=jnp.float16),
+            syn_current_e=jnp.zeros(n_neurons, dtype=jnp.float16),
+            syn_current_i=jnp.zeros(n_neurons, dtype=jnp.float16),
             # Soft reset traces
-            trace_pre=state.trace_pre * 0.5,
-            trace_post=state.trace_post * 0.5,
-            eligibility_trace=state.eligibility_trace * 0.9,
+            trace_pre=state.trace_pre * jnp.float16(0.5),
+            trace_post=state.trace_post * jnp.float16(0.5),
+            eligibility_trace=state.eligibility_trace * jnp.float16(0.9),
             # Soft reset homeostasis
-            firing_rate=state.firing_rate * 0.9 + 5.0 * 0.1,
-            threshold_adapt=state.threshold_adapt * 0.9,
+            firing_rate=state.firing_rate * jnp.float16(0.9) + jnp.float16(5.0 * 0.1),
+            threshold_adapt=state.threshold_adapt * jnp.float16(0.9),
             # Soft reset neuromodulation
-            dopamine=state.dopamine * 0.8 + 0.2 * 0.2,
-            value_estimate=state.value_estimate * 0.5,
+            dopamine=state.dopamine * jnp.float16(0.8) + jnp.float16(0.2 * 0.2),
+            value_estimate=state.value_estimate * jnp.float16(0.5),
             # Reset motor
-            motor_trace=jnp.zeros(6),  # 6 motor neurons
-            input_buffer=jnp.zeros(input_buffer_size),
+            motor_trace=jnp.zeros(6, dtype=jnp.float16),  # 6 motor neurons
+            input_buffer=jnp.zeros(input_buffer_size, dtype=jnp.float16),
             # Update meta
             learning_rate=new_lr,
             action_temperature=new_temp,

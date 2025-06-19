@@ -89,7 +89,7 @@ def create_initial_state(
     is_excitatory = is_excitatory.at[4:8].set(False)  # Next 4 are inhibitory
     
     # Initialize weight matrix
-    w = jnp.zeros((n_total, n_total + n_input))
+    w = jnp.zeros((n_total, n_total + n_input), dtype=jnp.float16)
     w_mask = jnp.zeros((n_total, n_total + n_input), dtype=bool)
     
     # Input connections (to sensory neurons)
@@ -98,7 +98,7 @@ def create_initial_state(
     
     # Initialize input weights
     input_weights = random.normal(keys[2], (network_config.num_sensory, n_input)) * 0.5 + 0.5
-    input_weights = jnp.abs(input_weights)  # Positive input weights
+    input_weights = jnp.abs(input_weights).astype(jnp.float16)  # Positive input weights
     w = w.at[:network_config.num_sensory, :n_input].set(input_weights * input_mask)
     
     # Recurrent connections
@@ -151,8 +151,8 @@ def create_initial_state(
     recurrent_weights = jnp.abs(recurrent_weights) * 2.0  # Scale up
     
     # Apply Dale's principle to initial weights
-    sign_mask = jnp.where(is_excitatory, 1.0, -1.0)
-    recurrent_weights = jnp.abs(recurrent_weights) * sign_mask[:, None]
+    sign_mask = jnp.where(is_excitatory, 1.0, -1.0).astype(jnp.float16)
+    recurrent_weights = (jnp.abs(recurrent_weights) * sign_mask[:, None]).astype(jnp.float16)
     
     # Set weights where connections exist
     w = w.at[:, recurrent_offset:].set(recurrent_weights * w_mask[:, recurrent_offset:])
@@ -169,7 +169,7 @@ def create_initial_state(
         w_plastic_mask = w_plastic_mask.at[:, recurrent_offset+read_start:].set(False)
     
     # Initialize neural dynamics
-    v_init = jnp.full(n_total, dynamics_config.v_rest)
+    v_init = jnp.full(n_total, dynamics_config.v_rest, dtype=jnp.float16)
     
     # Pre-compute excitatory and inhibitory weight matrices
     # Create masks for excitatory/inhibitory neurons (including input channels)
@@ -183,8 +183,8 @@ def create_initial_state(
     inh_pre_mask = ~is_exc_full[None, :]  # Shape: (1, n_total + n_input)
     
     # Apply masks to create separated weight matrices
-    w_exc = jnp.where(exc_pre_mask, w, 0.0)
-    w_inh = jnp.where(inh_pre_mask, w, 0.0)
+    w_exc = jnp.where(exc_pre_mask, w, 0.0).astype(jnp.float16)
+    w_inh = jnp.where(inh_pre_mask, w, 0.0).astype(jnp.float16)
     
     return NeoAgentState(
         # Core dynamics
@@ -198,29 +198,29 @@ def create_initial_state(
         w_inh=w_inh,
         w_mask=w_mask,
         w_plastic_mask=w_plastic_mask,
-        syn_current_e=jnp.zeros(n_total),
-        syn_current_i=jnp.zeros(n_total),
+        syn_current_e=jnp.zeros(n_total, dtype=jnp.float16),
+        syn_current_i=jnp.zeros(n_total, dtype=jnp.float16),
         
         # Plasticity
-        trace_pre=jnp.zeros(n_total),
-        trace_post=jnp.zeros(n_total),
-        eligibility_trace=jnp.zeros_like(w),
+        trace_pre=jnp.zeros(n_total, dtype=jnp.float16),
+        trace_post=jnp.zeros(n_total, dtype=jnp.float16),
+        eligibility_trace=jnp.zeros_like(w, dtype=jnp.float16),
         
         # Homeostasis
-        firing_rate=jnp.full(n_total, 5.0),  # Target rate
-        threshold_adapt=jnp.zeros(n_total),
+        firing_rate=jnp.full(n_total, 5.0, dtype=jnp.float16),  # Target rate
+        threshold_adapt=jnp.zeros(n_total, dtype=jnp.float16),
         
         # Neuromodulation
-        dopamine=jnp.array(0.2),  # Baseline dopamine
-        value_estimate=jnp.array(0.0),
+        dopamine=jnp.array(0.2, dtype=jnp.float16),  # Baseline dopamine
+        value_estimate=jnp.array(0.0, dtype=jnp.float16),
         
         # Learning
-        weight_momentum=jnp.zeros_like(w),
+        weight_momentum=jnp.zeros_like(w, dtype=jnp.float16),
         learning_rate=learning_config.base_learning_rate,
         
         # Motor/sensory
-        motor_trace=jnp.zeros(6),  # 6 motor neurons: 3 movement, 3 turning
-        input_buffer=jnp.zeros(n_input),
+        motor_trace=jnp.zeros(6, dtype=jnp.float16),  # 6 motor neurons: 3 movement, 3 turning
+        input_buffer=jnp.zeros(n_input, dtype=jnp.float16),
         
         # Structure
         is_excitatory=is_excitatory,
@@ -255,7 +255,7 @@ def update_weight_matrices(state: NeoAgentState) -> NeoAgentState:
     inh_pre_mask = ~is_exc_full[None, :]  # Shape: (1, n_total + n_input)
     
     # Apply masks to create separated weight matrices
-    w_exc = jnp.where(exc_pre_mask, state.w, 0.0)
-    w_inh = jnp.where(inh_pre_mask, state.w, 0.0)
+    w_exc = jnp.where(exc_pre_mask, state.w, 0.0).astype(jnp.float16)
+    w_inh = jnp.where(inh_pre_mask, state.w, 0.0).astype(jnp.float16)
     
     return state._replace(w_exc=w_exc, w_inh=w_inh)

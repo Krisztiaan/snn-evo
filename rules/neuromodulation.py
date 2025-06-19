@@ -173,7 +173,7 @@ class EligibilityTraceRule(AbstractLearningRule):
         full_trace_pre = jnp.concatenate([state.input_buffer, state.trace_pre])
         
         # Create full pre-synaptic spikes
-        full_spike_pre = jnp.concatenate([state.input_buffer > 0.5, state.spike.astype(jnp.float32)])
+        full_spike_pre = jnp.concatenate([state.input_buffer > 0.5, state.spike.astype(jnp.float16)])
         
         # Calculate eligibility contributions
         pre_post = jnp.outer(state.spike, full_trace_pre)

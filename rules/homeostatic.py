@@ -69,7 +69,7 @@ class HomeostaticRule(AbstractLearningRule):
         
         # Update firing rate estimate with exponential moving average
         alpha = dt / self.tau
-        spike_rate = state.spike.astype(jnp.float32) * 1000.0 / dt  # Convert to Hz
+        spike_rate = state.spike.astype(jnp.float16) * 1000.0 / dt  # Convert to Hz
         new_firing_rate = (1 - alpha) * state.firing_rate + alpha * spike_rate
         
         # Calculate homeostatic error
@@ -151,7 +151,7 @@ class ThresholdAdaptationRule(AbstractLearningRule):
         
         # Update firing rate estimate
         alpha = dt / self.tau
-        spike_rate = state.spike.astype(jnp.float32) * 1000.0 / dt  # Hz
+        spike_rate = state.spike.astype(jnp.float16) * 1000.0 / dt  # Hz
         new_firing_rate = (1 - alpha) * state.firing_rate + alpha * spike_rate
         
         # Calculate rate error
